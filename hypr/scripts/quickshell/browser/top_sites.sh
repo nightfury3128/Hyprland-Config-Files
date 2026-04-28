@@ -39,6 +39,29 @@ SELECT
   visit_count AS visit_count
 FROM urls
 WHERE url LIKE 'http%'
+  AND url NOT LIKE 'http://localhost%'
+  AND url NOT LIKE 'https://localhost%'
+  AND url NOT LIKE 'http://127.%'
+  AND url NOT LIKE 'https://127.%'
+  AND url NOT LIKE 'http://10.%'
+  AND url NOT LIKE 'https://10.%'
+  AND url NOT LIKE 'http://192.168.%'
+  AND url NOT LIKE 'https://192.168.%'
+  AND url NOT LIKE 'http://172.16.%'
+  AND url NOT LIKE 'https://172.16.%'
+  AND url NOT LIKE 'http://172.17.%'
+  AND url NOT LIKE 'https://172.17.%'
+  AND url NOT LIKE 'http://172.18.%'
+  AND url NOT LIKE 'https://172.18.%'
+  AND url NOT LIKE 'http://172.19.%'
+  AND url NOT LIKE 'https://172.19.%'
+  AND url NOT LIKE 'http://172.2%'
+  AND url NOT LIKE 'https://172.2%'
+  AND url NOT LIKE 'http://172.30.%'
+  AND url NOT LIKE 'https://172.30.%'
+  AND url NOT LIKE 'http://172.31.%'
+  AND url NOT LIKE 'https://172.31.%'
+  AND url NOT LIKE '%://%.local%'
   AND hidden = 0
 ORDER BY visit_count DESC
 LIMIT 12;
@@ -63,6 +86,8 @@ BEGIN { print "["; first=1; count=0; }
     sub(/^https?:\/\//, "", host);
     sub(/^www\./, "", host);
     sub(/\/.*/, "", host);
+    # Extra guard for any non-SQL-filtered local/dev hosts.
+    if (host ~ /(^localhost$)|(^127\.)|(^10\.)|(^192\.168\.)|(^172\.(1[6-9]|2[0-9]|3[0-1])\.)|(\.local$)/) next;
     if (!first) printf(",\n");
     printf("  {\"title\":\"%s\",\"url\":\"%s\",\"host\":\"%s\",\"visits\":%s}", title, url, host, visits);
     first=0;

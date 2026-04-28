@@ -43,10 +43,14 @@ Item {
         property string lastWifiSsid: ""
         property string lastWifiJson: ""
         property string lastBtJson: ""
+        property real lastSpeedDownload: 0.0
+        property real lastSpeedUpload: 0.0
+        property real lastSpeedPing: 0.0
     }
 
     readonly property string cacheDir: Quickshell.env("XDG_RUNTIME_DIR") ? (Quickshell.env("XDG_RUNTIME_DIR") + "/qs_network") : (Quickshell.env("HOME") + "/.cache/qs_network")
     readonly property string modeFilePath: cacheDir + "/mode"
+    readonly property string speedtestCachePath: cacheDir + "/speedtest.json"
 
     property bool ignoreNextModeFileUpdate: false
     Process {
@@ -75,9 +79,16 @@ Item {
 
         if (cache.lastWifiJson !== "") processWifiJson(cache.lastWifiJson);
         if (cache.lastBtJson !== "") processBtJson(cache.lastBtJson);
+        window.lastDownloadMbps = cache.lastSpeedDownload;
+        window.lastUploadMbps = cache.lastSpeedUpload;
+        window.lastPingMs = cache.lastSpeedPing;
+        if (window.lastDownloadMbps > 0 || window.lastUploadMbps > 0 || window.lastPingMs > 0) {
+            window.speedtestStatus = "Auto test updated";
+        }
         introState = 1.0;
         
         if (window.activeMode === "wifi") savedNetworksFetcher.running = true;
+        speedtestStateReader.running = true;
     }
 
     function playSfx(filename) {
@@ -136,6 +147,10 @@ Item {
     Timer { id: btPendingReset; interval: 8000; onTriggered: { window.btPowerPending = false; window.expectedBtPower = ""; } }
 
     property bool showInfoView: false
+    property real lastDownloadMbps: 0.0
+    property real lastUploadMbps: 0.0
+    property real lastPingMs: 0.0
+    property string speedtestStatus: ""
 
     property string pendingWifiSsid: ""
     property string pendingWifiId: ""
@@ -150,6 +165,41 @@ Item {
                 window.savedWifiNetworks = text ? text.split('\n') : [];
             }
         }
+    }
+
+    Process {
+        id: speedtestStateReader
+        command: ["bash", "-c", "cat '" + window.speedtestCachePath + "' 2>/dev/null || echo ''"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let raw = this.text.trim();
+                if (raw === "") return;
+                try {
+                    let r = JSON.parse(raw);
+                    if (r.ok) {
+                        window.lastDownloadMbps = Number(r.download || 0);
+                        window.lastUploadMbps = Number(r.upload || 0);
+                        window.lastPingMs = Number(r.ping || 0);
+                        cache.lastSpeedDownload = window.lastDownloadMbps;
+                        cache.lastSpeedUpload = window.lastUploadMbps;
+                        cache.lastSpeedPing = window.lastPingMs;
+                        window.speedtestStatus = "Auto test updated";
+                    } else {
+                        window.speedtestStatus = r.reason || "Speed test unavailable";
+                    }
+                    if (window.activeMode === "wifi" && window.currentConn && window.showInfoView) {
+                        window.updateInfoNodes();
+                    }
+                } catch(e) {}
+            }
+        }
+    }
+    Timer {
+        interval: 3000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: speedtestStateReader.running = true
     }
 
     Process {
@@ -421,6 +471,13 @@ Item {
                     nodes.push({ id: "sec_" + i, name: obj.security || "Open", icon: "󰦝", action: "Security", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     if (obj.ip) nodes.push({ id: "ip_" + i, name: obj.ip, icon: "󰩟", action: "IP Address", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     if (obj.freq) nodes.push({ id: "freq_" + i, name: obj.freq, icon: "󰖧", action: "Band", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    if (window.lastDownloadMbps > 0 || window.lastUploadMbps > 0 || window.lastPingMs > 0) {
+                        nodes.push({ id: "spd_down_" + i, name: window.lastDownloadMbps.toFixed(1) + " Mbps", icon: "󰇚", action: "Download", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                        nodes.push({ id: "spd_up_" + i, name: window.lastUploadMbps.toFixed(1) + " Mbps", icon: "󰕒", action: "Upload", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                        nodes.push({ id: "spd_ping_" + i, name: Math.round(window.lastPingMs) + " ms", icon: "󰀂", action: "Latency", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    } else if (window.speedtestStatus !== "") {
+                        nodes.push({ id: "spd_wait_" + i, name: window.speedtestStatus, icon: "󱤅", action: "Speed Test", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    }
                 } else {
                     nodes.push({ id: "bat_" + obj.mac, name: (obj.battery || "0") + "%", icon: "󰥉", action: "Battery", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     if (obj.profile) {

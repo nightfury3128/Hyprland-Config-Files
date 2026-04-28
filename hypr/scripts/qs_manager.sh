@@ -121,6 +121,7 @@ BAR_QML_PATH="$HOME/.config/hypr/scripts/quickshell/TopBar.qml"
 ISLAND_QML_PATH="$HOME/.config/hypr/scripts/quickshell/DynamicIsland.qml"
 LAUNCHER_QML_PATH="$HOME/.config/hypr/scripts/quickshell/AppLauncher.qml"
 CLIPBOARD_QML_PATH="$HOME/.config/hypr/scripts/quickshell/ClipboardViewer.qml"
+SPEEDTEST_DAEMON_PATH="$HOME/.config/hypr/scripts/quickshell/network/speedtest_daemon.sh"
 
 if ! pgrep -f "quickshell.*Main\.qml" >/dev/null; then
     quickshell -p "$MAIN_QML_PATH" >/dev/null 2>&1 &
@@ -144,6 +145,15 @@ fi
 
 if ! pgrep -f "quickshell.*ClipboardViewer\.qml" >/dev/null; then
     quickshell -p "$CLIPBOARD_QML_PATH" >/dev/null 2>&1 &
+    disown
+fi
+
+# Reset any stale watcher-only processes before ensuring one daemon instance.
+pkill -f "speedtest_daemon\.sh" >/dev/null 2>&1 || true
+pkill -f "^nmcli monitor$" >/dev/null 2>&1 || true
+
+if ! pgrep -f "speedtest_daemon\.sh" >/dev/null; then
+    bash "$SPEEDTEST_DAEMON_PATH" >/dev/null 2>&1 &
     disown
 fi
 
