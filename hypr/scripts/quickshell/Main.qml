@@ -219,7 +219,7 @@ PanelWindow {
     onIsVisibleChanged: {
         if (isVisible) masterWindow.requestActivate();
     }
-
+    
     Item {
         x: masterWindow.animX
         y: masterWindow.animY

@@ -584,7 +584,7 @@ Item {
                     transform: Translate { y: window.s(20) * (1.0 - introHeader) }
 
                     Rectangle {
-                        width: (parent.width - window.s(2)) / 3 
+                        width: (tabHost.width - window.s(2)) / 3 
                         height: parent.height - window.s(2)
                         y: window.s(1)
                         radius: window.s(10)
@@ -604,42 +604,94 @@ Item {
 
                     RowLayout {
                         anchors.fill: parent
-                        spacing: 0
+                        anchors.margins: window.s(1)
+                        spacing: window.s(8)
                         
-                        Repeater {
-                            model: ListModel {
-                                ListElement { tabId: "outputs"; icon: "󰓃"; label: "Outputs" } 
-                                ListElement { tabId: "inputs"; icon: "󰍬"; label: "Inputs" }   
-                                ListElement { tabId: "apps"; icon: "󰎆"; label: "Streams" } 
-                            }
-                            
-                            delegate: Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                
-                                RowLayout {
-                                    anchors.centerIn: parent
-                                    spacing: window.s(8)
-                                    Text {
-                                        font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18)
-                                        color: window.activeTab === tabId ? window.crust : (tabMa.containsMouse ? window.text : window.subtext0)
-                                        text: icon
-                                        Behavior on color { ColorAnimation { duration: 200 } }
+                        Item {
+                            id: tabHost
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 0
+
+                                Repeater {
+                                    model: ListModel {
+                                        ListElement { tabId: "outputs"; icon: "󰓃"; label: "Outputs" } 
+                                        ListElement { tabId: "inputs"; icon: "󰍬"; label: "Inputs" }   
+                                        ListElement { tabId: "apps"; icon: "󰎆"; label: "Streams" } 
                                     }
-                                    Text {
-                                        font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(13)
-                                        color: window.activeTab === tabId ? window.crust : (tabMa.containsMouse ? window.text : window.subtext0)
-                                        text: label
-                                        Behavior on color { ColorAnimation { duration: 200 } }
+                                    
+                                    delegate: Item {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        
+                                        RowLayout {
+                                            anchors.centerIn: parent
+                                            spacing: window.s(8)
+                                            Text {
+                                                font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18)
+                                                color: window.activeTab === tabId ? window.crust : (tabMa.containsMouse ? window.text : window.subtext0)
+                                                text: icon
+                                                Behavior on color { ColorAnimation { duration: 200 } }
+                                            }
+                                            Text {
+                                                font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(13)
+                                                color: window.activeTab === tabId ? window.crust : (tabMa.containsMouse ? window.text : window.subtext0)
+                                                text: label
+                                                Behavior on color { ColorAnimation { duration: 200 } }
+                                            }
+                                        }
+                                        
+                                        MouseArea {
+                                            id: tabMa
+                                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                window.activeTab = tabId;
+                                            }
+                                        }
                                     }
                                 }
-                                
-                                MouseArea {
-                                    id: tabMa
-                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        window.activeTab = tabId;
-                                    }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: window.s(132)
+                            Layout.fillHeight: true
+                            radius: window.s(10)
+                            color: netTabMa.containsMouse ? "#14ffffff" : "transparent"
+                            border.color: "#1affffff"
+                            border.width: 1
+                            Behavior on color { ColorAnimation { duration: 200 } }
+
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: window.s(8)
+                                Text {
+                                    font.family: "Iosevka Nerd Font"
+                                    font.pixelSize: window.s(17)
+                                    color: netTabMa.containsMouse ? window.text : window.subtext0
+                                    text: "󰤨"
+                                    Behavior on color { ColorAnimation { duration: 200 } }
+                                }
+                                Text {
+                                    font.family: "JetBrains Mono"
+                                    font.weight: Font.Black
+                                    font.pixelSize: window.s(12)
+                                    color: netTabMa.containsMouse ? window.text : window.subtext0
+                                    text: "Net/BT"
+                                    Behavior on color { ColorAnimation { duration: 200 } }
+                                }
+                            }
+
+                            MouseArea {
+                                id: netTabMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network wifi"]);
                                 }
                             }
                         }

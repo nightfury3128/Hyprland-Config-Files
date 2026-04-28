@@ -1983,7 +1983,7 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottomMargin: window.s(25)
-                width: window.s(360)
+                width: window.s(520)
                 height: window.s(54)
                 radius: window.s(14)
                 color: "#1affffff" 
@@ -2066,6 +2066,44 @@ Item {
                                 if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
                                 if (window.activeMode !== "bt") window.playSfx("switch.wav");
                                 window.activeMode = "bt";
+                            }
+                        }
+                    }
+
+                    Rectangle { width: 1; Layout.fillHeight: true; Layout.margins: window.s(5); color: "#33ffffff" }
+
+                    // Audio Popup Button
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: window.s(10)
+                        color: audioTabMa.containsMouse ? window.surface1 : "transparent"
+                        Behavior on color { ColorAnimation { duration: 200 } }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: window.s(10)
+                            opacity: audioTabMa.containsMouse ? 0.85 : 0.0
+                            Behavior on opacity { NumberAnimation { duration: 200 } }
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: Qt.lighter(window.peach, 1.1) }
+                                GradientStop { position: 1.0; color: window.peach }
+                            }
+                        }
+
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: window.s(8)
+                            Text { font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18); color: window.text; text: "󰕾"; Behavior on color { ColorAnimation{duration:200} } }
+                            Text { font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(13); color: window.text; text: "Audio"; Behavior on color { ColorAnimation{duration:200} } }
+                        }
+                        MouseArea {
+                            id: audioTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
+                                window.playSfx("switch.wav");
+                                Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle volume"]);
                             }
                         }
                     }
@@ -2154,6 +2192,7 @@ Item {
                     }
                 }
             }
+
         }
     }
 }
