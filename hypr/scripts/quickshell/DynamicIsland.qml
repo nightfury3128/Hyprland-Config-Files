@@ -51,6 +51,14 @@ PanelWindow {
     property bool expanded:      false
     property bool hovered:       false
     property bool userIsSeeking: false
+    property string activeWindowClass: ""
+    property string activeWindowTitle: ""
+    property bool bravePriorityActive: false
+    readonly property bool isSpotifyWindow: (activeWindowClass || "").toLowerCase().indexOf("spotify") >= 0
+    readonly property bool isBraveWindow: {
+        let c = (activeWindowClass || "").toLowerCase();
+        return c.indexOf("brave") >= 0;
+    }
 
     // Multi-screen: island follows the focused monitor
     property string activeMonitor: ""
@@ -73,6 +81,7 @@ PanelWindow {
     }
     property var availablePages: {
         let p = ["clock"];
+        if (islandWindow.isBraveWindow && islandWindow.activeWindowTitle !== "") p.push("app");
         if (islandWindow.isRecording)   p.push("recording");
         if (islandWindow.discordInCall) p.push("discord");
         if (islandWindow.isMediaActive) p.push("music");
@@ -156,6 +165,8 @@ PanelWindow {
 
     ListModel { id: notifHistoryList }
     property alias notifHistory: notifHistoryList
+    ListModel { id: topSitesModel }
+    property alias topSites: topSitesModel
 
     // Pulse animations — lifted to island level so pages can bind to them
     property real notifPulse: 0.9
@@ -211,11 +222,16 @@ PanelWindow {
     property string dateStr:     ""
     property string weatherIcon: ""
     property string weatherTemp: "--°"
+    property string geoTimezone: ""
 
     // =========================================================
     // --- HELPERS ---
     // =========================================================
     function exec(cmd) { Quickshell.execDetached(["bash", "-c", cmd]); }
+    function openUrl(url) {
+        if (!url || url === "") return;
+        Quickshell.execDetached(["xdg-open", url]);
+    }
 
     function playSound(type) {
         let map = {
@@ -255,6 +271,7 @@ PanelWindow {
     // =========================================================
     property var pageRegistry: [
         { name: "clock",     expandedH: 350, comp: clockPageComp     },
+        { name: "app",       expandedH: 300, comp: appPageComp       },
         { name: "recording", expandedH: 320, comp: recordingPageComp },
         { name: "discord",   expandedH: 270, comp: discordPageComp   },
         { name: "music",     expandedH: 630, comp: musicPageComp     },
@@ -262,6 +279,7 @@ PanelWindow {
     ]
 
     Component { id: clockPageComp;     ClockPage     { island: islandWindow } }
+    Component { id: appPageComp;       AppPage       { island: islandWindow } }
     Component { id: recordingPageComp; RecordingPage { island: islandWindow } }
     Component { id: discordPageComp;   DiscordPage   { island: islandWindow } }
     Component { id: musicPageComp;     MusicPage     { island: islandWindow } }
@@ -358,25 +376,56 @@ PanelWindow {
         onExited: { musicProc.running = true; running = true; }
     }
 
-    // Clock tick
-    Timer { interval: 1000; running: true; repeat: true; triggeredOnStart: true
-        onTriggered: {
-            let d = new Date();
-            islandWindow.timeStr    = Qt.formatDateTime(d, "hh:mm");
-            islandWindow.timeStrSec = Qt.formatDateTime(d, "hh:mm:ss");
-            islandWindow.dateStr    = Qt.formatDateTime(d, "ddd, MMM dd");
+    // Clock timezone source (derived from dynamic location weather script)
+    Process {
+        id: timezoneProc
+        command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/calendar/weather.sh --timezone 2>/dev/null || true"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let tz = this.text.trim();
+                if (tz !== "" && tz !== "null") islandWindow.geoTimezone = tz;
+            }
         }
     }
+    Timer { interval: 600000; running: true; repeat: true; triggeredOnStart: true
+        onTriggered: timezoneProc.running = true }
+
+    // Clock tick in detected timezone
+    Process {
+        id: clockProc
+        command: ["bash", "-c",
+            "tz=\"$1\"; " +
+            "if [ -n \"$tz\" ]; then TZ=\"$tz\" date '+%H:%M|%H:%M:%S|%a, %b %d'; " +
+            "else date '+%H:%M|%H:%M:%S|%a, %b %d'; fi",
+            "qs_clock_tz",
+            islandWindow.geoTimezone
+        ]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let parts = this.text.trim().split("|");
+                if (parts.length >= 3) {
+                    islandWindow.timeStr = parts[0];
+                    islandWindow.timeStrSec = parts[1];
+                    islandWindow.dateStr = parts[2];
+                }
+            }
+        }
+    }
+    Timer { interval: 1000; running: true; repeat: true; triggeredOnStart: true
+        onTriggered: clockProc.running = true }
 
     // Weather (calls --json to refresh cache, then parses hourly slot)
     Process {
         id: weatherProc
         command: ["bash", "-c",
             "data=$(~/.config/hypr/scripts/quickshell/calendar/weather.sh --json 2>/dev/null); " +
-            "ct=$(date +%H:%M); " +
+            "tz=\"$1\"; " +
+            "if [ -n \"$tz\" ]; then ct=$(TZ=\"$tz\" date +%H:%M); else ct=$(date +%H:%M); fi; " +
             "icon=$(echo \"$data\" | jq -r --arg ct \"$ct\" '(.forecast[0].hourly | map(select(.time <= $ct)) | last) // .forecast[0].hourly[0] | .icon' 2>/dev/null); " +
             "temp=$(echo \"$data\" | jq -r --arg ct \"$ct\" '(.forecast[0].hourly | map(select(.time <= $ct)) | last) // .forecast[0].hourly[0] | .temp' 2>/dev/null); " +
-            "echo \"$icon|$temp\""
+            "echo \"$icon|$temp\"",
+            "qs_weather_tz",
+            islandWindow.geoTimezone
         ]
         stdout: StdioCollector {
             onStreamFinished: {
@@ -400,10 +449,10 @@ PanelWindow {
         onTriggered: {
             islandWindow.notifActive = false;
             islandWindow.notifData   = null;
-            if (!islandWindow.wasExpandedBeforeNotif) {
-                islandWindow.expanded          = false;
-                islandWindow.notifBadgeVisible = true;
-            }
+            // Fully dismiss transient notifications after timeout.
+            // Keep user-expanded state intact, but do not leave a badge trail.
+            if (!islandWindow.wasExpandedBeforeNotif) islandWindow.expanded = false;
+            islandWindow.notifBadgeVisible = false;
         }
     }
 
@@ -592,6 +641,58 @@ PanelWindow {
     }
     Timer { interval: 150; running: true; triggeredOnStart: true; onTriggered: focusedMonProc.running = true }
 
+    // Focused app watcher (used for app-aware island surfaces)
+    Process {
+        id: activeWindowProc
+        command: ["bash", "-c",
+            "hyprctl activewindow -j 2>/dev/null | jq -r '[(.class // \"\"), (.title // \"\")] | @tsv'"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let raw = this.text.trim();
+                if (!raw) return;
+                let parts = raw.split("\t");
+                islandWindow.activeWindowClass = parts.length > 0 ? parts[0].trim() : "";
+                islandWindow.activeWindowTitle = parts.length > 1 ? parts.slice(1).join("\t").trim() : "";
+            }
+        }
+    }
+    Timer { interval: 500; running: true; repeat: true; triggeredOnStart: true; onTriggered: activeWindowProc.running = true }
+    Timer {
+        id: bravePriorityTimer
+        interval: 5000
+        onTriggered: {
+            islandWindow.bravePriorityActive = false;
+            islandWindow.applyContextPage();
+        }
+    }
+
+    Process {
+        id: topSitesProc
+        command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/browser/top_sites.sh 2>/dev/null || echo '[]'"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let raw = this.text.trim();
+                if (raw === "") raw = "[]";
+                try {
+                    let items = JSON.parse(raw);
+                    topSites.clear();
+                    for (let i = 0; i < Math.min(items.length, 3); i++) {
+                        let t = (items[i].title || "").trim();
+                        let h = (items[i].host || "").trim();
+                        let label = t !== "" ? t : h;
+                        if (label.length > 28) label = label.substring(0, 27) + "…";
+                        topSites.append({
+                            title: label,
+                            host: h,
+                            url: (items[i].url || "").trim()
+                        });
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+    Timer { interval: 300000; running: true; repeat: true; triggeredOnStart: true; onTriggered: topSitesProc.running = true }
+
     // --- Reactive state ---
     onMusicDataChanged: {
         let should = isMediaActive && musicData.status === "Playing";
@@ -628,6 +729,39 @@ PanelWindow {
     }
     onNotifActiveChanged: {
         if (notifActive) notifBadgeVisible = false;
+    }
+    function applyContextPage() {
+        if (expanded || notifActive) return;
+        if (isBraveWindow && activeWindowTitle !== "" && bravePriorityActive) {
+            currentPage = "app";
+            return;
+        }
+        if (isMediaActive) {
+            currentPage = "music";
+            return;
+        }
+        if (isBraveWindow && activeWindowTitle !== "") {
+            currentPage = "app";
+            return;
+        }
+        if (currentPage === "app") currentPage = "clock";
+    }
+    onActiveWindowClassChanged: {
+        if (isBraveWindow && activeWindowTitle !== "") {
+            bravePriorityActive = true;
+            bravePriorityTimer.restart();
+        } else {
+            bravePriorityActive = false;
+            bravePriorityTimer.stop();
+        }
+        applyContextPage();
+    }
+    onActiveWindowTitleChanged: {
+        if (isBraveWindow && activeWindowTitle !== "") {
+            bravePriorityActive = true;
+            bravePriorityTimer.restart();
+        }
+        applyContextPage();
     }
 
     // =========================================================
@@ -672,13 +806,14 @@ PanelWindow {
 
         property int collapsedW: {
             if (islandWindow.osdActive)                                                return osdCollapsed.preferredWidth;
+            if (islandWindow.currentPage === "app"       && islandWindow.isBraveWindow) return appCollapsed.preferredWidth;
             if (islandWindow.currentPage === "recording" && islandWindow.isRecording) return recordingCollapsed.preferredWidth;
             if (islandWindow.currentPage === "discord"   && islandWindow.discordInCall) return discordCollapsed.preferredWidth;
             if (islandWindow.currentPage === "music"     && islandWindow.isMediaActive) return musicCollapsed.preferredWidth;
             if (islandWindow.currentPage === "notifs")                                  return notifsCollapsed.preferredWidth;
             return clockCollapsed.preferredWidth;
         }
-        property int collapsedH: s(48)
+        property int collapsedH: (islandWindow.currentPage === "app" && islandWindow.isBraveWindow) ? s(58) : s(48)
         property int expandedW:  Math.min(s(760), Screen.width - s(32))
         property int expandedH: {
             if (islandWindow.notifActive) return s(88);
@@ -937,6 +1072,15 @@ PanelWindow {
                     NumberAnimation { duration: 200; easing.type: Easing.InOutCubic }
                 }}
             }
+            AppCollapsed {
+                id: appCollapsed; island: islandWindow; anchors.centerIn: parent
+                opacity: (!islandWindow.osdActive && !islandWindow.volDragging && islandWindow.currentPage === "app" && islandWindow.isBraveWindow) ? 1.0 : 0.0
+                visible: opacity > 0.001
+                Behavior on opacity { SequentialAnimation {
+                    PauseAnimation { duration: islandWindow.currentPage === "app" && !islandWindow.osdActive ? 60 : 0 }
+                    NumberAnimation { duration: 200; easing.type: Easing.InOutCubic }
+                }}
+            }
             MusicCollapsed {
                 id: musicCollapsed; island: islandWindow; anchors.centerIn: parent
                 opacity: (!islandWindow.osdActive && !islandWindow.volDragging && islandWindow.currentPage === "music" && islandWindow.isMediaActive) ? 1.0 : 0.0
@@ -1106,6 +1250,18 @@ PanelWindow {
 
         focus: islandWindow.expanded
         Keys.onEscapePressed: { if (islandWindow.expanded) { islandWindow.expanded = false; event.accepted = true; } }
+        Keys.onPressed: (event) => {
+            // If a transient notification popup is open, any typing dismisses it immediately.
+            // This keeps typing workflows uninterrupted.
+            if (islandWindow.notifActive) {
+                islandWindow.notifActive = false;
+                islandWindow.notifData = null;
+                islandWindow.notifBadgeVisible = false;
+                if (!islandWindow.wasExpandedBeforeNotif) islandWindow.expanded = false;
+                notifHideTimer.stop();
+                event.accepted = true;
+            }
+        }
     }
 
     // =========================================================

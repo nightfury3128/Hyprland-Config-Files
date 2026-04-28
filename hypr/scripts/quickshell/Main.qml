@@ -14,8 +14,8 @@ PanelWindow {
 
     WlrLayershell.namespace: "qs-master"
     WlrLayershell.layer: WlrLayer.Overlay
-    
-    exclusionMode: ExclusionMode.Ignore 
+
+    exclusionMode: ExclusionMode.Ignore
     focusable: true
 
     width: Screen.width
@@ -23,14 +23,26 @@ PanelWindow {
 
     visible: isVisible
 
+    // Multi-screen: popup follows the focused monitor
+    property string activeMonitor: ""
+    property string pendingMonitor: ""
+    property var targetScreen: {
+        let screens = Quickshell.screens;
+        for (let i = 0; i < screens.length; i++) {
+            if (screens[i].name === masterWindow.activeMonitor) return screens[i];
+        }
+        return screens.length > 0 ? screens[0] : null;
+    }
+    screen: masterWindow.targetScreen
+
     mask: Region { item: topBarHole; intersection: Intersection.Xor }
-    
+
     Item {
         id: topBarHole
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 65 
+        height: Registry.s(70, Registry.getScale(Screen.width, masterWindow.globalUiScale))
     }
 
     MouseArea {
@@ -68,22 +80,6 @@ PanelWindow {
         id: globalNotificationHistory
     }
 
-    // 2. Transient Popups (For the OSD)
-    ListModel {
-        id: activePopupsModel
-    }
-
-    property int _popupCounter: 0
-
-    function removePopup(uid) {
-        for (let i = 0; i < activePopupsModel.count; i++) {
-            if (activePopupsModel.get(i).uid === uid) {
-                activePopupsModel.remove(i);
-                break;
-            }
-        }
-    }
-
     NotificationServer {
         id: globalNotificationServer
         bodySupported: true
@@ -112,12 +108,7 @@ PanelWindow {
             // A. Insert into the permanent center
             globalNotificationHistory.insert(0, notifData);
 
-            // B. Append to the on-screen popups
-            masterWindow._popupCounter++;
-            let popupData = Object.assign({ "uid": masterWindow._popupCounter }, notifData);
-            activePopupsModel.append(popupData);
-
-            // C. Show in Dynamic Island via IPC
+            // B. Dynamic Island is the live notification surface.
             Quickshell.execDetached([
                 "bash", "-c",
                 'printf "%s\n" "$1" > /tmp/qs_island_notif',
@@ -167,12 +158,39 @@ PanelWindow {
             onStreamFinished: {
                 settingsReader.running = false;
                 settingsReader.running = true;
-                
+
                 settingsWatcher.running = false;
                 settingsWatcher.running = true;
             }
         }
     }
+
+    // --- Focused monitor tracking: popup appears on the active screen ---
+    Process {
+        id: focusedMonProc
+        command: ["bash", "-c", "hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.focused) | .name'"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let m = this.text.trim();
+                if (m === "" || m === "null") return;
+                if (masterWindow.isVisible) {
+                    // Buffer the change; apply it once the popup closes
+                    masterWindow.pendingMonitor = m;
+                } else {
+                    masterWindow.activeMonitor = m;
+                }
+            }
+        }
+    }
+    Process {
+        id: focusedMonWatcher
+        running: true
+        command: ["bash", "-c",
+            "socat -u UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock - " +
+            "| grep -m1 '^focusedmon'"]
+        onExited: { focusedMonProc.running = true; running = true; }
+    }
+    Timer { interval: 150; running: true; triggeredOnStart: true; onTriggered: focusedMonProc.running = true }
 
     function getLayout(name) {
         return Registry.getLayout(name, 0, 0, Screen.width, Screen.height, masterWindow.globalUiScale);
@@ -283,9 +301,17 @@ PanelWindow {
                 masterWindow.exitDuration = 300;
                 masterWindow.disableMorph = false;
                 
-                // Polymorphic start point: top center where the island is
-                masterWindow.animX = Math.floor(Screen.width / 2);
-                masterWindow.animY = 35; 
+                // Popup-like widgets should originate near the top-right bar button,
+                // while island-style widgets keep the center-origin animation.
+                let initialLayout = getLayout(newWidget);
+                if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume")) {
+                    masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(Screen.width, masterWindow.globalUiScale));
+                    masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(Screen.width, masterWindow.globalUiScale));
+                } else {
+                    // Polymorphic start point: top center where the island is
+                    masterWindow.animX = Math.floor(Screen.width / 2);
+                    masterWindow.animY = 35;
+                }
                 masterWindow.animW = 1;
                 masterWindow.animH = 1;
 
@@ -377,11 +403,16 @@ PanelWindow {
 
     Timer {
         id: delayedClear
-        interval: masterWindow.morphDuration 
+        interval: masterWindow.morphDuration
         onTriggered: {
             masterWindow.currentActive = "hidden";
             widgetStack.clear();
             masterWindow.disableMorph = false;
+            // Apply any buffered screen change now that the popup is gone
+            if (masterWindow.pendingMonitor !== "" && masterWindow.activeMonitor !== masterWindow.pendingMonitor) {
+                masterWindow.activeMonitor = masterWindow.pendingMonitor;
+                masterWindow.pendingMonitor = "";
+            }
         }
     }
 }

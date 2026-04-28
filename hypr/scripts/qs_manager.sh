@@ -16,6 +16,12 @@ mkdir -p "$QS_NETWORK_CACHE"
 IPC_FILE="/tmp/qs_widget_state"
 NETWORK_MODE_FILE="$QS_NETWORK_CACHE/mode"
 
+# Notifications are handled by Quickshell DynamicIsland NotificationServer.
+# Stop legacy daemons to avoid duplicate popups.
+pkill -x dunst >/dev/null 2>&1 || true
+pkill -x mako >/dev/null 2>&1 || true
+pkill -x swaync >/dev/null 2>&1 || true
+
 ACTION="$1"
 TARGET="$2"
 SUBTARGET="$3"
@@ -140,6 +146,10 @@ if ! pgrep -f "quickshell.*ClipboardViewer\.qml" >/dev/null; then
     quickshell -p "$CLIPBOARD_QML_PATH" >/dev/null 2>&1 &
     disown
 fi
+
+# Ensure legacy notification windows are not running; notifications are handled by DynamicIsland.qml
+pkill -f "quickshell.*NotificationPopups\.qml" >/dev/null 2>&1 || true
+pkill -f "quickshell.*IslandNotifications\.qml" >/dev/null 2>&1 || true
 
 # -----------------------------------------------------------------------------
 # IPC ROUTING

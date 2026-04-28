@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
 
-quickshell -p ~/.config/hypr/scripts/quickshell/Lock.qml
+# Single lock entrypoint used by activbar and keybinds.
+# Keep this aligned with hypridle lock_cmd for consistent UX.
+pidof hyprlock >/dev/null 2>&1 || exec hyprlock
 

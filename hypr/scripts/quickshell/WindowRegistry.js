@@ -3,14 +3,10 @@
 function getScale(mw, userScale) {
     if (mw <= 0) return 1.0;
     let r = mw / 1920.0;
-    let baseScale = 1.0;
-    
-    if (r <= 1.0) {
-        baseScale = Math.max(0.35, Math.pow(r, 0.85));
-    } else {
-        // SCALING UP:
-        baseScale = Math.pow(r, 0.5);
-    }
+    // Keep popups visually consistent across monitors by using a mild curve
+    // and hard clamping the result so they never become tiny or gigantic.
+    let baseScale = Math.pow(r, 0.18);
+    baseScale = Math.max(0.90, Math.min(1.10, baseScale));
     
     // Multiply the screen-calculated scale by the user's uiScale
     return baseScale * (userScale !== undefined ? userScale : 1.0);
@@ -36,8 +32,10 @@ function getLayout(name, mx, my, mw, mh, userScale) {
         // Centered horizontally under the dynamic island
         "music":     { w: s(700, scale), h: s(620, scale), rx: Math.floor((mw/2)-(s(700, scale)/2)), ry: s(70, scale), comp: "music/MusicPopup.qml" },
         
-        // Right-aligned: pinned 20px from the right edge dynamically (Width: 900 + 20 margin = 920)
-        "network":   { w: s(900, scale), h: s(700, scale), rx: mw - s(920, scale), ry: s(70, scale), comp: "network/NetworkPopup.qml" },
+        // Right-aligned: pinned 20px from screen edge (Width: 960 + 20 margin = 980)
+        // Extra width/height ensures orbit cards (max radius s(360) + half-card s(85) = s(445))
+        // have comfortable margins inside the popup's clip boundary at all screen scales.
+        "network":   { w: s(960, scale), h: s(740, scale), rx: mw - s(980, scale), ry: s(70, scale), comp: "network/NetworkPopup.qml" },
         
         // Centered both horizontally and vertically
         "stewart":   { w: s(800, scale), h: s(600, scale), rx: Math.floor((mw/2)-(s(800, scale)/2)), ry: Math.floor((mh/2)-(s(600, scale)/2)), comp: "stewart/stewart.qml" },

@@ -1,4 +1,5 @@
 module collapsed
+AppCollapsed 1.0 AppCollapsed.qml
 ClockCollapsed 1.0 ClockCollapsed.qml
 DiscordCollapsed 1.0 DiscordCollapsed.qml
 MusicCollapsed 1.0 MusicCollapsed.qml
