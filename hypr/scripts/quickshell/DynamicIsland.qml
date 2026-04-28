@@ -54,11 +54,13 @@ PanelWindow {
     property string activeWindowClass: ""
     property string activeWindowTitle: ""
     property bool bravePriorityActive: false
+    property double braveSuppressUntil: 0
     readonly property bool isSpotifyWindow: (activeWindowClass || "").toLowerCase().indexOf("spotify") >= 0
     readonly property bool isBraveWindow: {
         let c = (activeWindowClass || "").toLowerCase();
         return c.indexOf("brave") >= 0;
     }
+    readonly property bool braveAutoAllowed: Date.now() >= braveSuppressUntil
 
     // Multi-screen: island follows the focused monitor
     property string activeMonitor: ""
@@ -70,17 +72,18 @@ PanelWindow {
         return screens.length > 0 ? screens[0] : null;
     }
 
-    // Page navigation: "clock" | "music" | "notifs"
+    // Page navigation: "clock" | "timer" | "music" | "notifs"
     property string currentPage: "clock"
     property string prevPage:    "clock"
     property bool   notifAutoSwitched: false
+    property double manualPageHoldUntil: 0
     onCurrentPageChanged: {
         if (currentPage !== "notifs") { prevPage = currentPage; notifAutoSwitched = false; }
         if (currentPage === "notifs" && !expanded && notifAutoSwitched) notifPageRevertTimer.restart();
         else notifPageRevertTimer.stop();
     }
     property var availablePages: {
-        let p = ["clock"];
+        let p = ["clock", "timer"];
         if (islandWindow.isBraveWindow && islandWindow.activeWindowTitle !== "") p.push("app");
         if (islandWindow.isRecording)   p.push("recording");
         if (islandWindow.discordInCall) p.push("discord");
@@ -93,12 +96,79 @@ PanelWindow {
             currentPage = availablePages.length > 0 ? availablePages[0] : "clock";
     }
     function navigateNext() {
+        manualPageHoldUntil = Date.now() + 2500;
         let i = availablePages.indexOf(currentPage);
         currentPage = availablePages[(i + 1) % availablePages.length];
     }
     function navigatePrev() {
+        manualPageHoldUntil = Date.now() + 2500;
         let i = availablePages.indexOf(currentPage);
         currentPage = availablePages[(i - 1 + availablePages.length) % availablePages.length];
+    }
+
+    // Timer / Stopwatch
+    property int timerPresetSec: 300
+    property int timerRemainingSec: 0
+    property bool timerRunning: false
+    property int stopwatchElapsedSec: 0
+    property bool stopwatchRunning: false
+    readonly property bool chronoActive: timerRunning || stopwatchRunning || timerRemainingSec > 0 || stopwatchElapsedSec > 0
+    readonly property bool timerChipVisible: !expanded && !osdActive && (timerRunning || timerRemainingSec > 0)
+    readonly property bool stopwatchChipVisible: !expanded && !osdActive && (stopwatchRunning || stopwatchElapsedSec > 0)
+    readonly property bool chronoEdgeCompact: !expanded || currentPage !== "timer"
+
+    function fmtChrono(sec) {
+        let t = Math.max(0, parseInt(sec) || 0);
+        let h = Math.floor(t / 3600);
+        let m = Math.floor((t % 3600) / 60);
+        let s2 = t % 60;
+        if (h > 0) return h + ":" + (m < 10 ? "0" : "") + m + ":" + (s2 < 10 ? "0" : "") + s2;
+        return (m < 10 ? "0" : "") + m + ":" + (s2 < 10 ? "0" : "") + s2;
+    }
+
+    function parseChronoInput(raw) {
+        let t = (raw || "").trim();
+        if (t === "") return 0;
+        let parts = t.split(":");
+        let nums = [];
+        for (let i = 0; i < parts.length; i++) {
+            let n = parseInt(parts[i]);
+            if (isNaN(n) || n < 0) return 0;
+            nums.push(n);
+        }
+        if (nums.length === 1) return nums[0]; // "30" => 30 seconds
+        if (nums.length === 2) return nums[0] * 60 + nums[1]; // mm:ss
+        if (nums.length === 3) return nums[0] * 3600 + nums[1] * 60 + nums[2]; // hh:mm:ss
+        return 0;
+    }
+
+    function startTimer(seconds) {
+        let val = Math.max(1, parseInt(seconds) || 0);
+        timerRemainingSec = val;
+        timerPresetSec = val;
+        timerRunning = true;
+        stopwatchRunning = false;
+    }
+
+    function toggleTimer() {
+        if (timerRemainingSec <= 0) timerRemainingSec = Math.max(1, timerPresetSec || 300);
+        timerRunning = !timerRunning;
+        if (timerRunning) stopwatchRunning = false;
+    }
+
+    function resetTimer() {
+        timerRunning = false;
+        timerRemainingSec = 0;
+    }
+
+    function toggleStopwatch() {
+        stopwatchRunning = !stopwatchRunning;
+        if (stopwatchRunning) timerRunning = false;
+    }
+
+    function resetStopwatch() {
+        stopwatchRunning = false;
+        stopwatchElapsedSec = 0;
     }
 
     // Music
@@ -237,9 +307,15 @@ PanelWindow {
         let map = {
             "notification": "/usr/share/sounds/freedesktop/stereo/message.oga",
             "volume":       "/usr/share/sounds/freedesktop/stereo/audio-volume-change.oga",
+            "timer_end":    "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga",
         };
         let f = map[type] || "";
-        if (f) exec("[ -f \"" + f + "\" ] && paplay \"" + f + "\" 2>/dev/null &");
+        if (!f) return;
+        exec(
+            "if [ -f \"" + f + "\" ]; then " +
+            " (pw-play \"" + f + "\" >/dev/null 2>&1 || paplay \"" + f + "\" >/dev/null 2>&1 || canberra-gtk-play -f \"" + f + "\" >/dev/null 2>&1) & " +
+            "fi"
+        );
     }
 
     function saveNotifHistory() {
@@ -271,6 +347,7 @@ PanelWindow {
     // =========================================================
     property var pageRegistry: [
         { name: "clock",     expandedH: 350, comp: clockPageComp     },
+        { name: "timer",     expandedH: 400, comp: timerPageComp     },
         { name: "app",       expandedH: 300, comp: appPageComp       },
         { name: "recording", expandedH: 320, comp: recordingPageComp },
         { name: "discord",   expandedH: 270, comp: discordPageComp   },
@@ -279,6 +356,296 @@ PanelWindow {
     ]
 
     Component { id: clockPageComp;     ClockPage     { island: islandWindow } }
+    Component {
+        id: timerPageComp
+        Item {
+            id: timerRoot
+            property var island: islandWindow
+            property string mode: "timer" // timer | stopwatch
+            property string customInput: "00:05:00"
+            property bool inlineEdit: false
+            readonly property bool timerMode: mode === "timer"
+
+            Item {
+                anchors.fill: parent
+                anchors.margins: island.s(24)
+                anchors.bottomMargin: island.s(72)
+                clip: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: island.s(14)
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: island.s(14)
+
+                        Rectangle {
+                            Layout.preferredWidth: island.s(88)
+                            Layout.preferredHeight: island.s(88)
+                            radius: island.s(14)
+                            color: Qt.rgba(island.surface0.r, island.surface0.g, island.surface0.b, 0.72)
+                            border.width: 1
+                            border.color: Qt.rgba(island.text.r, island.text.g, island.text.b, 0.12)
+                            Text {
+                                anchors.centerIn: parent
+                                text: timerRoot.timerMode ? "󰔛" : "󱎫"
+                                font.family: "Iosevka Nerd Font"
+                                font.pixelSize: island.s(42)
+                                color: timerRoot.timerMode ? island.mauve : island.blue
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: island.s(4)
+                            Text {
+                                text: timerRoot.timerMode ? "Timer" : "Stopwatch"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: island.s(20)
+                                font.weight: Font.Black
+                                color: island.text
+                            }
+                            Text {
+                                text: timerRoot.timerMode
+                                    ? (island.timerRunning ? "Countdown active" : "Set duration and start")
+                                    : (island.stopwatchRunning ? "Tracking elapsed time" : "Ready to track time")
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: island.s(11)
+                                color: island.subtext0
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: island.s(44)
+                        radius: island.s(12)
+                        color: Qt.rgba(island.surface0.r, island.surface0.g, island.surface0.b, 0.64)
+                        border.width: 1
+                        border.color: Qt.rgba(island.text.r, island.text.g, island.text.b, 0.10)
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: island.s(4)
+                            spacing: island.s(6)
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                radius: island.s(10)
+                                color: timerRoot.timerMode ? Qt.rgba(island.mauve.r, island.mauve.g, island.mauve.b, 0.18) : "transparent"
+                                border.width: timerRoot.timerMode ? 1 : 0
+                                border.color: Qt.rgba(island.mauve.r, island.mauve.g, island.mauve.b, 0.40)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "󰔛  Timer"
+                                    font.family: "Iosevka Nerd Font"
+                                    font.pixelSize: island.s(13)
+                                    color: timerRoot.timerMode ? island.mauve : island.text
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: timerRoot.mode = "timer" }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                radius: island.s(10)
+                                color: !timerRoot.timerMode ? Qt.rgba(island.blue.r, island.blue.g, island.blue.b, 0.18) : "transparent"
+                                border.width: !timerRoot.timerMode ? 1 : 0
+                                border.color: Qt.rgba(island.blue.r, island.blue.g, island.blue.b, 0.40)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "󱎫  Stopwatch"
+                                    font.family: "Iosevka Nerd Font"
+                                    font.pixelSize: island.s(13)
+                                    color: !timerRoot.timerMode ? island.blue : island.text
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: timerRoot.mode = "stopwatch" }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.preferredWidth: island.s(280)
+                        Layout.preferredHeight: island.s(66)
+                        radius: island.s(12)
+                        color: (timerRoot.timerMode && timerRoot.inlineEdit)
+                            ? Qt.rgba(island.surface0.r, island.surface0.g, island.surface0.b, 0.8)
+                            : "transparent"
+                        border.width: (timerRoot.timerMode && timerRoot.inlineEdit) ? 1 : 0
+                        border.color: Qt.rgba(island.mauve.r, island.mauve.g, island.mauve.b, 0.35)
+
+                        Text {
+                            anchors.centerIn: parent
+                            visible: !(timerRoot.timerMode && timerRoot.inlineEdit)
+                            text: timerRoot.timerMode
+                                ? island.fmtChrono(island.timerRemainingSec > 0 ? island.timerRemainingSec : island.timerPresetSec)
+                                : island.fmtChrono(island.stopwatchElapsedSec)
+                            font.family: "JetBrains Mono"
+                            font.pixelSize: island.s(48)
+                            font.weight: Font.Black
+                            color: island.text
+                        }
+
+                        TextField {
+                            id: inlineTimerEditor
+                            anchors.centerIn: parent
+                            visible: timerRoot.timerMode && timerRoot.inlineEdit
+                            width: island.s(220)
+                            text: timerRoot.customInput
+                            horizontalAlignment: TextInput.AlignHCenter
+                            font.family: "JetBrains Mono"
+                            font.pixelSize: island.s(38)
+                            font.weight: Font.Black
+                            color: island.text
+                            placeholderText: "HH:MM:SS"
+                            background: Item {}
+                            onVisibleChanged: {
+                                if (visible) {
+                                    forceActiveFocus();
+                                    selectAll();
+                                }
+                            }
+                            onAccepted: {
+                                let secs = island.parseChronoInput(text);
+                                if (secs > 0) {
+                                    timerRoot.customInput = text;
+                                    island.timerPresetSec = secs;
+                                    if (!island.timerRunning || island.timerRemainingSec <= 0) island.timerRemainingSec = secs;
+                                }
+                                timerRoot.inlineEdit = false;
+                            }
+                            Keys.onEscapePressed: {
+                                timerRoot.inlineEdit = false;
+                                event.accepted = true;
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: timerRoot.timerMode && !timerRoot.inlineEdit
+                            onClicked: {
+                                timerRoot.customInput = island.fmtChrono(island.timerRemainingSec > 0 ? island.timerRemainingSec : island.timerPresetSec);
+                                timerRoot.inlineEdit = true;
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        spacing: island.s(12)
+
+                        Rectangle {
+                            Layout.preferredWidth: island.s(132)
+                            Layout.preferredHeight: island.s(40)
+                            radius: island.s(12)
+                            color: timerRoot.timerMode
+                                ? Qt.rgba(island.mauve.r, island.mauve.g, island.mauve.b, 0.82)
+                                : Qt.rgba(island.blue.r, island.blue.g, island.blue.b, 0.82)
+                            Text {
+                                anchors.centerIn: parent
+                                text: timerRoot.timerMode
+                                    ? (island.timerRunning ? "Pause" : "Start")
+                                    : (island.stopwatchRunning ? "Pause" : "Start")
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: island.s(12)
+                                font.weight: Font.Black
+                                color: island.base
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    if (timerRoot.timerMode) {
+                                        // Always honor the latest typed value, even if Enter wasn't pressed.
+                                        let raw = timerRoot.inlineEdit ? inlineTimerEditor.text : timerRoot.customInput;
+                                        let secs = island.parseChronoInput(raw);
+                                        if (secs > 0) {
+                                            timerRoot.customInput = raw;
+                                            island.timerPresetSec = secs;
+                                            if (!island.timerRunning || island.timerRemainingSec <= 0) island.timerRemainingSec = secs;
+                                        }
+                                        timerRoot.inlineEdit = false;
+                                        island.toggleTimer();
+                                    } else {
+                                        island.toggleStopwatch();
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: island.s(98)
+                            Layout.preferredHeight: island.s(40)
+                            radius: island.s(12)
+                            color: Qt.rgba(island.surface1.r, island.surface1.g, island.surface1.b, 0.82)
+                            border.width: 1
+                            border.color: Qt.rgba(island.text.r, island.text.g, island.text.b, 0.16)
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Reset"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: island.s(12)
+                                font.weight: Font.Black
+                                color: island.text
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    if (timerRoot.timerMode) island.resetTimer();
+                                    else island.resetStopwatch();
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: island.s(8)
+                        visible: timerRoot.timerMode
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "Click the time to edit (HH:MM:SS / MM:SS / minutes)"
+                            font.family: "JetBrains Mono"
+                            font.pixelSize: island.s(10)
+                            color: island.subtext0
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: island.s(8)
+                            Repeater {
+                                model: [300, 600, 900, 1500]
+                                delegate: Rectangle {
+                                    required property int modelData
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: island.s(28)
+                                    radius: island.s(10)
+                                    color: Qt.rgba(island.surface1.r, island.surface1.g, island.surface1.b, 0.66)
+                                    border.width: 1
+                                    border.color: Qt.rgba(island.text.r, island.text.g, island.text.b, 0.12)
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: Math.round(modelData / 60) + "m"
+                                        font.family: "JetBrains Mono"
+                                        font.pixelSize: island.s(10)
+                                        font.weight: Font.Bold
+                                        color: island.subtext0
+                                    }
+                                    MouseArea { anchors.fill: parent; onClicked: island.startTimer(modelData) }
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+        }
+    }
     Component { id: appPageComp;       AppPage       { island: islandWindow } }
     Component { id: recordingPageComp; RecordingPage { island: islandWindow } }
     Component { id: discordPageComp;   DiscordPage   { island: islandWindow } }
@@ -413,6 +780,25 @@ PanelWindow {
     }
     Timer { interval: 1000; running: true; repeat: true; triggeredOnStart: true
         onTriggered: clockProc.running = true }
+
+    Timer {
+        interval: 1000
+        running: islandWindow.timerRunning || islandWindow.stopwatchRunning
+        repeat: true
+        onTriggered: {
+            if (islandWindow.timerRunning) {
+                islandWindow.timerRemainingSec = Math.max(0, islandWindow.timerRemainingSec - 1);
+                if (islandWindow.timerRemainingSec <= 0) {
+                    islandWindow.timerRunning = false;
+                    islandWindow.playSound("timer_end");
+                    islandWindow.exec("notify-send -u normal -i alarm-symbolic 'Timer Finished' 'Your countdown has ended.'");
+                }
+            }
+            if (islandWindow.stopwatchRunning) {
+                islandWindow.stopwatchElapsedSec = islandWindow.stopwatchElapsedSec + 1;
+            }
+        }
+    }
 
     // Weather (calls --json to refresh cache, then parses hourly slot)
     Process {
@@ -700,11 +1086,12 @@ PanelWindow {
         if (!should && cavaProc.running) cavaProc.running = false;
     }
     onIsMediaActiveChanged: {
+        let holdActive = Date.now() < manualPageHoldUntil;
         if (isMediaActive) {
-            if (currentPage === "clock") currentPage = "music";
+            if (!holdActive && currentPage === "clock") currentPage = "music";
         } else {
             if (expanded && !notifActive) expanded = false;
-            if (currentPage === "music") currentPage = "clock";
+            if (!holdActive && currentPage === "music") currentPage = "clock";
             if (cavaProc.running) cavaProc.running = false;
         }
     }
@@ -732,7 +1119,8 @@ PanelWindow {
     }
     function applyContextPage() {
         if (expanded || notifActive) return;
-        if (isBraveWindow && activeWindowTitle !== "" && bravePriorityActive) {
+        if (Date.now() < manualPageHoldUntil) return;
+        if (isBraveWindow && activeWindowTitle !== "" && bravePriorityActive && braveAutoAllowed) {
             currentPage = "app";
             return;
         }
@@ -740,7 +1128,7 @@ PanelWindow {
             currentPage = "music";
             return;
         }
-        if (isBraveWindow && activeWindowTitle !== "") {
+        if (isBraveWindow && activeWindowTitle !== "" && braveAutoAllowed) {
             currentPage = "app";
             return;
         }
@@ -751,6 +1139,8 @@ PanelWindow {
             bravePriorityActive = true;
             bravePriorityTimer.restart();
         } else {
+            // Leaving Brave starts a 5-minute cooldown before Brave can auto-take the page again.
+            braveSuppressUntil = Date.now() + (5 * 60 * 1000);
             bravePriorityActive = false;
             bravePriorityTimer.stop();
         }
@@ -805,13 +1195,16 @@ PanelWindow {
         z: 10
 
         property int collapsedW: {
+            let baseW = 0;
             if (islandWindow.osdActive)                                                return osdCollapsed.preferredWidth;
-            if (islandWindow.currentPage === "app"       && islandWindow.isBraveWindow) return appCollapsed.preferredWidth;
-            if (islandWindow.currentPage === "recording" && islandWindow.isRecording) return recordingCollapsed.preferredWidth;
-            if (islandWindow.currentPage === "discord"   && islandWindow.discordInCall) return discordCollapsed.preferredWidth;
-            if (islandWindow.currentPage === "music"     && islandWindow.isMediaActive) return musicCollapsed.preferredWidth;
-            if (islandWindow.currentPage === "notifs")                                  return notifsCollapsed.preferredWidth;
-            return clockCollapsed.preferredWidth;
+            if (islandWindow.currentPage === "app"       && islandWindow.isBraveWindow) baseW = appCollapsed.preferredWidth;
+            else if (islandWindow.currentPage === "recording" && islandWindow.isRecording) baseW = recordingCollapsed.preferredWidth;
+            else if (islandWindow.currentPage === "discord"   && islandWindow.discordInCall) baseW = discordCollapsed.preferredWidth;
+            else if (islandWindow.currentPage === "music"     && islandWindow.isMediaActive) baseW = musicCollapsed.preferredWidth;
+            else if (islandWindow.currentPage === "timer")                                  baseW = chronoCollapsed.preferredWidth;
+            else if (islandWindow.currentPage === "notifs")                                  baseW = notifsCollapsed.preferredWidth;
+            else baseW = clockCollapsed.preferredWidth;
+            return baseW;
         }
         property int collapsedH: (islandWindow.currentPage === "app" && islandWindow.isBraveWindow) ? s(58) : s(48)
         property int expandedW:  Math.min(s(760), Screen.width - s(32))
@@ -1072,6 +1465,62 @@ PanelWindow {
                     NumberAnimation { duration: 200; easing.type: Easing.InOutCubic }
                 }}
             }
+            Item {
+                id: chronoCollapsed
+                property int preferredWidth: islandWindow.s(220)
+                anchors.centerIn: parent
+                width: preferredWidth
+                height: islandWindow.s(40)
+                opacity: (!islandWindow.osdActive && !islandWindow.volDragging && islandWindow.currentPage === "timer") ? 1.0 : 0.0
+                visible: opacity > 0.001
+                Behavior on opacity { SequentialAnimation {
+                    PauseAnimation { duration: islandWindow.currentPage === "timer" && !islandWindow.osdActive ? 60 : 0 }
+                    NumberAnimation { duration: 200; easing.type: Easing.InOutCubic }
+                }}
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: height / 2
+                    color: Qt.rgba(islandWindow.surface0.r, islandWindow.surface0.g, islandWindow.surface0.b, 0.74)
+                    border.width: 1
+                    border.color: Qt.rgba(islandWindow.mauve.r, islandWindow.mauve.g, islandWindow.mauve.b, 0.40)
+                }
+
+                Row {
+                    anchors.centerIn: parent
+                    spacing: islandWindow.s(8)
+
+                    Text {
+                        text: (islandWindow.timerRunning || islandWindow.timerRemainingSec > 0) ? "󰔛" : "󱎫"
+                        font.family: "Iosevka Nerd Font"
+                        font.pixelSize: islandWindow.s(16)
+                        color: (islandWindow.timerRunning || islandWindow.timerRemainingSec > 0) ? islandWindow.mauve : islandWindow.blue
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: (islandWindow.timerRunning || islandWindow.timerRemainingSec > 0)
+                            ? islandWindow.fmtChrono(islandWindow.timerRemainingSec > 0 ? islandWindow.timerRemainingSec : islandWindow.timerPresetSec)
+                            : islandWindow.fmtChrono(islandWindow.stopwatchElapsedSec)
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: islandWindow.s(13)
+                        font.weight: Font.Black
+                        color: islandWindow.text
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: (islandWindow.timerRunning || islandWindow.timerRemainingSec > 0) ? "Timer" : "Stopwatch"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: islandWindow.s(10)
+                        color: islandWindow.subtext0
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: islandWindow.expanded = true
+                }
+            }
             AppCollapsed {
                 id: appCollapsed; island: islandWindow; anchors.centerIn: parent
                 opacity: (!islandWindow.osdActive && !islandWindow.volDragging && islandWindow.currentPage === "app" && islandWindow.isBraveWindow) ? 1.0 : 0.0
@@ -1164,6 +1613,7 @@ PanelWindow {
                     color: "white"; anchors.verticalCenter: parent.verticalCenter
                 }
             }
+
         }
 
         // ============================================================
@@ -1260,6 +1710,121 @@ PanelWindow {
                 if (!islandWindow.wasExpandedBeforeNotif) islandWindow.expanded = false;
                 notifHideTimer.stop();
                 event.accepted = true;
+            }
+        }
+    }
+
+    // =========================================================
+    // CHRONO EDGE CHIPS
+    // Stopwatch on LEFT, Timer on RIGHT
+    // =========================================================
+    Item {
+        id: stopwatchEdgeChip
+        z: 10
+        height: s(32)
+        width: islandWindow.chronoEdgeCompact ? s(32) : (chipRow.implicitWidth + s(20))
+        x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
+           - ((islandWindow.vpnBadgeVisible || discordBubble.shouldShow) ? (s(42)) : 0)
+        y: s(8) + (islandShape.collapsedH - height) / 2
+
+        opacity: islandWindow.stopwatchChipVisible ? 1.0 : 0.0
+        visible: opacity > 0.001
+        scale: islandWindow.stopwatchChipVisible ? 1.0 : 0.6
+        transformOrigin: Item.Right
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 280; easing.type: Easing.OutBack } }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: Qt.rgba(islandWindow.base.r, islandWindow.base.g, islandWindow.base.b, 0.92)
+            border.width: 1.2
+            border.color: Qt.rgba(islandWindow.blue.r, islandWindow.blue.g, islandWindow.blue.b, 0.55)
+        }
+
+        Row {
+            id: chipRow
+            anchors.centerIn: parent
+            spacing: s(6)
+            Text {
+                text: "󱎫"
+                font.family: "Iosevka Nerd Font"
+                font.pixelSize: s(13)
+                color: islandWindow.blue
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                visible: !islandWindow.chronoEdgeCompact
+                text: islandWindow.fmtChrono(islandWindow.stopwatchElapsedSec)
+                font.family: "JetBrains Mono"
+                font.pixelSize: s(10)
+                font.weight: Font.Black
+                color: islandWindow.text
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                islandWindow.currentPage = "timer";
+                islandWindow.expanded = true;
+            }
+        }
+    }
+
+    Item {
+        id: timerEdgeChip
+        z: 10
+        height: s(32)
+        width: islandWindow.chronoEdgeCompact ? s(32) : (chipRowR.implicitWidth + s(20))
+        x: Math.floor(Screen.width / 2) + islandShape.collapsedW / 2 + s(10) + islandWindow.volRightExtra
+           + (recBubble.shouldShow ? (recBubble.width + s(8)) : 0)
+           + (islandWindow.notifBadgeVisible ? s(44) : 0)
+        y: s(8) + (islandShape.collapsedH - height) / 2
+
+        opacity: islandWindow.timerChipVisible ? 1.0 : 0.0
+        visible: opacity > 0.001
+        scale: islandWindow.timerChipVisible ? 1.0 : 0.6
+        transformOrigin: Item.Left
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on scale { NumberAnimation { duration: 280; easing.type: Easing.OutBack } }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: Qt.rgba(islandWindow.base.r, islandWindow.base.g, islandWindow.base.b, 0.92)
+            border.width: 1.2
+            border.color: Qt.rgba(islandWindow.mauve.r, islandWindow.mauve.g, islandWindow.mauve.b, 0.58)
+        }
+
+        Row {
+            id: chipRowR
+            anchors.centerIn: parent
+            spacing: s(6)
+            Text {
+                text: "󰔛"
+                font.family: "Iosevka Nerd Font"
+                font.pixelSize: s(13)
+                color: islandWindow.mauve
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+                visible: !islandWindow.chronoEdgeCompact
+                text: islandWindow.fmtChrono(islandWindow.timerRemainingSec)
+                font.family: "JetBrains Mono"
+                font.pixelSize: s(10)
+                font.weight: Font.Black
+                color: islandWindow.text
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                islandWindow.currentPage = "timer";
+                islandWindow.expanded = true;
             }
         }
     }

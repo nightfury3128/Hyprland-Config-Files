@@ -782,7 +782,7 @@ Item {
                                 onClicked: {
                                     if (window.activeTab !== "apps" && !model.is_default) {
                                         let type = window.activeTab === "outputs" ? "sink" : "source";
-                                        Quickshell.execDetached(["bash", window.scriptsDir + "/audio_control.sh", "set-default", type, model.name]);
+                                        Quickshell.execDetached(["bash", window.scriptsDir + "/audio_control.sh", "set-default", type, model.id]);
                                         audioPoller.running = true;
                                     }
                                 }
