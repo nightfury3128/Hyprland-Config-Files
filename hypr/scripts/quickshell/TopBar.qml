@@ -39,6 +39,8 @@ Variants {
             }
 
             property int barHeight: s(48)
+            property bool compactRightPills: barWindow.width < 1850
+            property bool compactEverywhere: barWindow.width < 1650
 
             // THICKER BAR, MINIMAL MARGINS (Scaled)
             height: barHeight
@@ -616,7 +618,7 @@ Variants {
                     anchors.left: centerBox.right // Hard boundary to prevent overlaps
                     anchors.leftMargin: barWindow.s(12)
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: barWindow.s(4)
+                    spacing: barWindow.compactRightPills ? barWindow.s(2) : barWindow.s(4)
                     
                     // Staggered Right Transition
                     property bool showLayout: false
@@ -743,7 +745,7 @@ Variants {
                         Row {
                             id: sysLayout
                             anchors.centerIn: parent
-                            spacing: barWindow.s(8) 
+                            spacing: barWindow.compactRightPills ? barWindow.s(5) : barWindow.s(8)
 
                             property int pillHeight: barWindow.s(34)
 
@@ -771,7 +773,7 @@ Variants {
                                 Row { 
                                     id: kbLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
                                     Text { anchors.verticalCenter: parent.verticalCenter; text: "󰌌"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: parent.parent.isHovered ? mocha.text : mocha.overlay2 }
-                                    Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.kbLayout; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; color: mocha.text }
+                                    Text { anchors.verticalCenter: parent.verticalCenter; visible: !barWindow.compactEverywhere; text: barWindow.kbLayout; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; color: mocha.text }
                                 }
                                 MouseArea { id: kbMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Quickshell.execDetached(["hyprctl", "switchxkblayout", "main", "next"]) }
                             }
@@ -822,7 +824,7 @@ Variants {
                                         id: wifiText
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: barWindow.showEthernet ? barWindow.ethStatus : ((barWindow.isWifiOn ? (barWindow.wifiSsid !== "" ? barWindow.wifiSsid : "On") : "Off"))
-                                        visible: text !== ""
+                                        visible: !barWindow.compactRightPills && text !== ""
                                         font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black;
                                         color: barWindow.showEthernet ? (barWindow.ethStatus === "Connected" ? mocha.base : mocha.text) : (barWindow.isWifiOn ? mocha.base : mocha.text);
                                         width: Math.min(implicitWidth, barWindow.s(100)); elide: Text.ElideRight 
@@ -873,7 +875,7 @@ Variants {
                                         id: btText
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: barWindow.btDevice
-                                        visible: text !== ""; 
+                                        visible: !barWindow.compactRightPills && text !== ""; 
                                         font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; 
                                         color: barWindow.isBtOn ? mocha.base : mocha.text; 
                                         width: Math.min(implicitWidth, barWindow.s(100)); elide: Text.ElideRight 
@@ -929,6 +931,7 @@ Variants {
                                     }
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
+                                        visible: !barWindow.compactRightPills
                                         text: barWindow.volPercent
                                         font.family: "JetBrains Mono"
                                         font.pixelSize: barWindow.s(13)
@@ -989,7 +992,7 @@ Variants {
                                     }
                                     Text { 
                                         anchors.verticalCenter: parent.verticalCenter
-                                        visible: !barWindow.isDesktop
+                                        visible: !barWindow.isDesktop && !barWindow.compactEverywhere
                                         text: barWindow.batPercent; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; 
                                         color: mocha.base // Always mocha.base since gradient is 1.0 opacity
                                         Behavior on color { ColorAnimation { duration: 300 } }
