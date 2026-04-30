@@ -156,6 +156,7 @@ Item {
                             Slider {
                                 id: eq; anchors.fill: parent; orientation: Qt.Vertical; from: -12; to: 12; stepSize: 1; value: root.eqData["b"+(index+1)] || 0
                                 onMoved: exec(`~/.config/hypr/scripts/quickshell/music/equalizer.sh set_band ${index+1} ${value}`)
+                                onPressedChanged: if (!pressed) exec("~/.config/hypr/scripts/quickshell/music/equalizer.sh apply")
                                 background: Rectangle { anchors.centerIn: parent; width: root.s(6); height: parent.height; radius: 3; color: surface0 }
                                 handle: Rectangle { x: (parent.width-12)/2; y: eq.visualPosition * (parent.height-12); width: 12; height: 12; radius: 6; color: mauve }
                             }
