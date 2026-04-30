@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 ACTION="${1:-up}"
 STEP="${2:-5}"
+BRIGHT_SCRIPT="$HOME/.config/hypr/scripts/brightness.sh"
 
 case "$ACTION" in
-    up)   brightnessctl set +${STEP}% 2>/dev/null ;;
-    down) brightnessctl set ${STEP}- 2>/dev/null ;;
+    up)   "$BRIGHT_SCRIPT" set "+${STEP}%" 2>/dev/null ;;
+    down) "$BRIGHT_SCRIPT" set "-${STEP}%" 2>/dev/null ;;
 esac
 
-BRIGHT=$(brightnessctl -m 2>/dev/null | awk -F, '{gsub(/%/,"",$4); print int($4)}')
+BRIGHT=$("$BRIGHT_SCRIPT" 2>/dev/null)
 echo "brightness|${BRIGHT:-50}" > /tmp/qs_osd

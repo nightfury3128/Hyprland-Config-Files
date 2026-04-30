@@ -91,6 +91,8 @@ Item {
         property bool sysMuted: false
         property real sysBrightness: 0
         property string currentUserName: "User"
+        property int batHealth: 0
+        property int batCycles: 0
     }
 
     // -------------------------------------------------------------------------
@@ -109,6 +111,10 @@ Item {
     property real sysVolume: widgetCache.sysVolume
     property bool sysMuted: widgetCache.sysMuted
     property real sysBrightness: widgetCache.sysBrightness
+    property int batHealth: widgetCache.batHealth
+    property int batCycles: widgetCache.batCycles
+    property string batStatus: "Unknown"
+    readonly property bool batCharging: batStatus === "Charging" || batStatus === "Full"
     
     property string currentUserName: widgetCache.currentUserName
 
@@ -158,6 +164,35 @@ Item {
     }
 
     Process {
+        id: batteryPoller
+        command: ["bash", "-c",
+            "bat=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -n1); " +
+            "[ -z \"$bat\" ] && { echo Unknown; echo 0; echo 0; exit 0; }; " +
+            "status=$(cat \"$bat/status\" 2>/dev/null || echo Unknown); " +
+            "cycles=$(cat \"$bat/cycle_count\" 2>/dev/null || echo 0); " +
+            "full=$(cat \"$bat/energy_full\" 2>/dev/null || cat \"$bat/charge_full\" 2>/dev/null || echo 0); " +
+            "design=$(cat \"$bat/energy_full_design\" 2>/dev/null || cat \"$bat/charge_full_design\" 2>/dev/null || echo 0); " +
+            "health=0; [ \"$design\" -gt 0 ] 2>/dev/null && health=$(( full * 100 / design )); " +
+            "echo \"$status\"; echo \"$health\"; echo \"$cycles\""
+        ]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let lines = this.text.trim().split("\n");
+                window.batStatus = lines.length >= 1 ? lines[0].trim() : "Unknown";
+                window.batHealth = lines.length >= 2 ? (parseInt(lines[1]) || 0) : 0;
+                widgetCache.batHealth = window.batHealth;
+                window.batCycles = lines.length >= 3 ? (parseInt(lines[2]) || 0) : 0;
+                widgetCache.batCycles = window.batCycles;
+            }
+        }
+    }
+    Timer {
+        interval: 30000; running: true; repeat: true; triggeredOnStart: true;
+        onTriggered: batteryPoller.running = true
+    }
+
+    Process {
         id: sysPoller
         // HIGHLY ROBUST BASH COMMANDS
         command: ["bash", "-c", 
@@ -168,7 +203,7 @@ Item {
             "powerprofilesctl get 2>/dev/null || echo 'balanced'; " +
             "awk '{print int($1/3600)\"h \"int(($1%3600)/60)\"m\"}' /proc/uptime 2>/dev/null || echo '0h 0m'; " +
             "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print int($2*100), ($3==\"[MUTED]\"?\"off\":\"on\")}' || echo '0 on'; " +
-            "brightnessctl -m 2>/dev/null | awk -F, '{print substr($4, 1, length($4)-1)}' || echo '0'"
+            "$HOME/.config/hypr/scripts/brightness.sh 2>/dev/null || echo '0'"
         ]
         running: true
         stdout: StdioCollector {
@@ -215,8 +250,9 @@ Item {
         }
     }
 
+    readonly property int statsPollInterval: batCharging ? 2500 : 4000
     Timer {
-        interval: 1500; running: true; repeat: true; triggeredOnStart: true;
+        interval: statsPollInterval; running: true; repeat: true; triggeredOnStart: true;
         onTriggered: sysPoller.running = true
     }
 
@@ -815,7 +851,7 @@ Item {
                     // ==========================================
                     Grid {
                         id: sysGrid
-                        columns: 2
+                        columns: 3
                         spacing: window.s(25)
                         anchors.centerIn: parent
                         anchors.verticalCenterOffset: window.s(-85) 
@@ -1004,6 +1040,42 @@ Item {
                             }
                             MouseArea { id: tempMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor }
                         }
+
+                        Item {
+                            width: window.s(145); height: window.s(145)
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: window.surface0
+                                border.color: window.surface1
+                                border.width: 1
+                            }
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: window.s(4)
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18); color: window.green; text: "󰓅" }
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(28); color: window.text; text: Math.max(0, window.batHealth) + "%" }
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: window.s(12); color: window.subtext0; text: "BAT HEALTH" }
+                            }
+                        }
+
+                        Item {
+                            width: window.s(145); height: window.s(145)
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: window.surface0
+                                border.color: window.surface1
+                                border.width: 1
+                            }
+                            ColumnLayout {
+                                anchors.centerIn: parent
+                                spacing: window.s(4)
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18); color: window.yellow; text: "󰂐" }
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(28); color: window.text; text: window.batCycles.toString() }
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: window.s(12); color: window.subtext0; text: "CYCLES" }
+                            }
+                        }
                     }
 
                     // ==========================================
@@ -1062,7 +1134,7 @@ Item {
                                             property int targetPct: -1
                                             onTriggered: {
                                                 if (targetPct >= 0) {
-                                                    Quickshell.execDetached(["brightnessctl", "set", targetPct + "%"]);
+                                                    Quickshell.execDetached(["bash", "-c", "$HOME/.config/hypr/scripts/brightness.sh set " + targetPct + "%"]);
                                                     targetPct = -1;
                                                 }
                                             }
@@ -1219,10 +1291,10 @@ Item {
 
                             Repeater {
                                 model: ListModel {
-                                    ListElement { cmd: "bash ~/.config/hypr/scripts/lock.sh"; icon: ""; label: "Lock"; baseColor: "mauve"; weight: 1.0 }
+                                    ListElement { cmd: "bash ~/.config/hypr/scripts/lock.sh"; icon: "󰌾"; label: "Lock"; baseColor: "mauve"; weight: 1.0 }
                                     ListElement { cmd: "bash ~/.config/hypr/scripts/lock.sh & systemctl suspend"; icon: "󰤄"; label: "Sleep"; baseColor: "blue"; weight: 1.0 }
                                     ListElement { cmd: "systemctl reboot"; icon: "󰑓"; label: "Reboot"; baseColor: "yellow"; weight: 2.5 }
-                                    ListElement { cmd: "systemctl poweroff -i"; icon: ""; label: "Shutdown"; baseColor: "red"; weight: 3.5 }
+                                    ListElement { cmd: "systemctl poweroff -i"; icon: "󰐥"; label: "Shutdown"; baseColor: "red"; weight: 3.5 }
                                 }
 
                                 delegate: Rectangle {
@@ -1459,7 +1531,14 @@ Item {
                                         MouseArea {
                                             id: profileMa
                                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                                            onClicked: { Quickshell.execDetached(["powerprofilesctl", "set", name]); sysPoller.running = true; }
+                                            onClicked: {
+                                                Quickshell.execDetached([
+                                                    "bash",
+                                                    "-c",
+                                                    "powerprofilesctl set '" + name + "' 2>/dev/null || notify-send -u low 'Power Profile' 'Failed to switch to " + name + "'"
+                                                ]);
+                                                sysPoller.running = true;
+                                            }
                                         }
                                     }
                                 }

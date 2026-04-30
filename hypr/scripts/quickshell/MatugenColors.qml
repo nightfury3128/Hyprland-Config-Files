@@ -70,7 +70,8 @@ Item {
     }
 
     Timer {
-        interval: 1000 
+        // Theme changes are infrequent; lower wakeups significantly.
+        interval: 5000
         running: true
         repeat: true
         triggeredOnStart: true

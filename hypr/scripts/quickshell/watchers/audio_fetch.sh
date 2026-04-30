@@ -2,7 +2,9 @@
 get_volume() {
     local vol=""
     if command -v wpctl &> /dev/null; then 
-        vol=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print int($2*100)}')
+        local line
+        line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+        vol=$(awk '{print int($2*100)}' <<< "$line")
     fi
     if [[ -z "$vol" ]] && command -v pamixer &> /dev/null; then 
         vol=$(pamixer --get-volume 2>/dev/null)
@@ -12,7 +14,9 @@ get_volume() {
 
 is_muted() {
     if command -v wpctl &> /dev/null; then
-        if wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -q "MUTED"; then echo "true"; else echo "false"; fi
+        local line
+        line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+        if grep -q "MUTED" <<< "$line"; then echo "true"; else echo "false"; fi
     elif command -v pamixer &> /dev/null; then
         if pamixer --get-mute 2>/dev/null | grep -q "true"; then echo "true"; else echo "false"; fi
     else 
@@ -42,5 +46,20 @@ toggle_mute() {
 
 case $1 in
     --toggle) toggle_mute ;;
-    *) jq -n -c --arg volume "$(get_volume)" --arg icon "$(get_volume_icon)" --arg is_muted "$(is_muted)" '{volume: $volume, icon: $icon, is_muted: $is_muted}' ;;
+    *)
+        if command -v wpctl &> /dev/null; then
+            line=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+            volume=$(awk '{print int($2*100)}' <<< "$line")
+            [[ -z "$volume" ]] && volume="0"
+            if grep -q "MUTED" <<< "$line"; then is_muted="true"; else is_muted="false"; fi
+            if [ "$is_muted" = "true" ]; then icon="󰝟"
+            elif [ "$volume" -ge 70 ]; then icon="󰕾"
+            elif [ "$volume" -ge 30 ]; then icon="󰖀"
+            elif [ "$volume" -gt 0 ]; then icon="󰕿"
+            else icon="󰝟"; fi
+            jq -n -c --arg volume "$volume" --arg icon "$icon" --arg is_muted "$is_muted" '{volume: $volume, icon: $icon, is_muted: $is_muted}'
+        else
+            jq -n -c --arg volume "$(get_volume)" --arg icon "$(get_volume_icon)" --arg is_muted "$(is_muted)" '{volume: $volume, icon: $icon, is_muted: $is_muted}'
+        fi
+        ;;
 esac
