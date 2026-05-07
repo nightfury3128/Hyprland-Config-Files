@@ -45,6 +45,8 @@ PanelWindow {
             _showing = true
             islandHideProc.running = false
             islandHideProc.running = true
+            usageLoadProc.running = false
+            usageLoadProc.running = true
             searchInput.text = ""
             filterApps("")
             appsProc.running = false
@@ -61,6 +63,17 @@ PanelWindow {
 
     ListModel { id: allAppsModel }
     ListModel { id: filteredModel }
+    property var usageCounts: ({})
+
+    function appUsageKey(app) {
+        return (app.desktop && app.desktop.length > 0) ? app.desktop : app.name
+    }
+
+    function usageScoreFor(app) {
+        let key = appUsageKey(app)
+        let val = usageCounts[key]
+        return val ? parseInt(val) || 0 : 0
+    }
 
     function fuzzyScore(name, query) {
         let n = name.toLowerCase(), q = query.toLowerCase()
@@ -77,8 +90,16 @@ PanelWindow {
         filteredModel.clear()
         let q = query.trim()
         if (!q) {
+            // Keep launcher clean: show only frequently used apps when query is empty.
+            let frequent = []
             for (let i = 0; i < allAppsModel.count; i++) {
                 let a = allAppsModel.get(i)
+                let usage = usageScoreFor(a)
+                if (usage > 0) frequent.push({ usage, a })
+            }
+            frequent.sort((x, y) => y.usage - x.usage || x.a.name.localeCompare(y.a.name))
+            for (let i = 0; i < frequent.length; i++) {
+                let a = frequent[i].a
                 filteredModel.append({ name: a.name, exec: a.exec, icon: a.icon, desktop: a.desktop })
             }
         } else {
@@ -86,9 +107,9 @@ PanelWindow {
             for (let i = 0; i < allAppsModel.count; i++) {
                 let a = allAppsModel.get(i)
                 let sc = fuzzyScore(a.name, q)
-                if (sc > 0) scored.push({ sc, a })
+                if (sc > 0) scored.push({ sc, usage: usageScoreFor(a), a })
             }
-            scored.sort((x, y) => y.sc - x.sc || x.a.name.localeCompare(y.a.name))
+            scored.sort((x, y) => y.sc - x.sc || y.usage - x.usage || x.a.name.localeCompare(y.a.name))
             for (let i = 0; i < scored.length; i++) {
                 let a = scored[i].a
                 filteredModel.append({ name: a.name, exec: a.exec, icon: a.icon, desktop: a.desktop })
@@ -100,6 +121,13 @@ PanelWindow {
     function launchApp(idx) {
         if (idx < 0 || idx >= filteredModel.count) return
         let a = filteredModel.get(idx)
+        let k = appUsageKey(a)
+        let map = usageCounts
+        map[k] = (parseInt(map[k]) || 0) + 1
+        usageCounts = map
+        usageWriteProc.appKey = k
+        usageWriteProc.running = false
+        usageWriteProc.running = true
         launchProc.launchCmd = a.exec
         launchProc.running   = false
         launchProc.running   = true
@@ -127,6 +155,40 @@ PanelWindow {
         id: launchProc
         property string launchCmd: ""
         command: ["bash", "-c", "nohup sh -c " + JSON.stringify(launchCmd) + " >/dev/null 2>&1 &"]
+    }
+
+    Process {
+        id: usageLoadProc
+        command: ["bash", "-c", "USAGE=\"$HOME/.cache/qs_launcher_usage.tsv\"; [ -f \"$USAGE\" ] && cat \"$USAGE\""]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let map = ({})
+                let rows = this.text.trim().split("\n")
+                for (let i = 0; i < rows.length; i++) {
+                    let line = rows[i].trim()
+                    if (!line) continue
+                    let p = line.split("|")
+                    if (p.length >= 2 && p[0]) map[p[0]] = parseInt(p[1]) || 0
+                }
+                launcherRoot.usageCounts = map
+                launcherRoot.filterApps(searchInput.text)
+            }
+        }
+    }
+
+    Process {
+        id: usageWriteProc
+        property string appKey: ""
+        command: ["bash", "-c",
+            "USAGE=\"$HOME/.cache/qs_launcher_usage.tsv\"; " +
+            "mkdir -p \"$(dirname \"$USAGE\")\"; touch \"$USAGE\"; " +
+            "KEY=" + JSON.stringify(appKey) + "; " +
+            "awk -F'|' -v OFS='|' -v key=\"$KEY\" '" +
+            "BEGIN{found=0} " +
+            "$1==key{$2=($2==\"\"?0:$2)+1;found=1} " +
+            "{if($1!=\"\") print $1,$2} " +
+            "END{if(!found) print key,1}' \"$USAGE\" > \"$USAGE.tmp\" && mv \"$USAGE.tmp\" \"$USAGE\""
+        ]
     }
 
     // ─── IPC ──────────────────────────────────────────────────────────────────

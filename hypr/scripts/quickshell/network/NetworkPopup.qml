@@ -26,7 +26,7 @@ Item {
         sequence: "Tab"
         onActivated: {
             if (window.pendingWifiId !== "") {
-                window.pendingWifiId = ""; window.pendingWifiSsid = "";
+                window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
                 return;
             }
             window.playSfx("switch.wav");
@@ -147,6 +147,11 @@ Item {
     Timer { id: btPendingReset; interval: 8000; onTriggered: { window.btPowerPending = false; window.expectedBtPower = ""; } }
 
     property bool showInfoView: false
+    property bool showSavedWifiView: false
+    onShowSavedWifiViewChanged: {
+        // Saved networks must always render as scan-style cards (no info-node overlay state).
+        if (showSavedWifiView) showInfoView = false;
+    }
     property real lastDownloadMbps: 0.0
     property real lastUploadMbps: 0.0
     property real lastPingMs: 0.0
@@ -154,6 +159,7 @@ Item {
 
     property string pendingWifiSsid: ""
     property string pendingWifiId: ""
+    property bool pendingWifiAllowEmpty: false
     property var savedWifiNetworks: []
 
     Process {
@@ -163,8 +169,50 @@ Item {
             onStreamFinished: {
                 let text = this.text.trim();
                 window.savedWifiNetworks = text ? text.split('\n') : [];
+                window.rebuildSavedWifiList();
             }
         }
+    }
+
+    ListModel { id: savedWifiListModel }
+
+    function rebuildSavedWifiList() {
+        savedWifiListModel.clear();
+        let names = [];
+        for (let i = 0; i < window.savedWifiNetworks.length; i++) {
+            let n = (window.savedWifiNetworks[i] || "").trim();
+            if (n !== "") names.push(n);
+        }
+        names.sort((a, b) => a.localeCompare(b));
+        for (let i = 0; i < names.length; i++) {
+            let ssid = names[i];
+            savedWifiListModel.append({
+                id: "saved_forget_" + i,
+                ssid: ssid,
+                mac: "",
+                name: ssid,
+                icon: "󰤨",
+                security: "",
+                action: "Forget Saved",
+                isInfoNode: false,
+                isActionable: true,
+                cmdStr: "FORGET_WIFI::" + ssid,
+                parentIndex: -1
+            });
+        }
+        savedWifiListModel.append({
+            id: "action_saved_close",
+            ssid: "",
+            mac: "",
+            name: "Scan Networks",
+            icon: "󰍉",
+            security: "",
+            action: "Back",
+            isInfoNode: false,
+            isActionable: true,
+            cmdStr: "CLOSE_SAVED_WIFI_VIEW",
+            parentIndex: -1
+        });
     }
 
     Process {
@@ -236,6 +284,16 @@ Item {
         }
     }
 
+    Process {
+        id: forgetWifiProcess
+        property string targetSsid: ""
+        command: ["bash", "-c", "nmcli connection delete " + JSON.stringify(targetSsid)]
+        onExited: {
+            savedNetworksFetcher.running = true;
+            if (window.activeMode === "wifi") wifiPoller.running = true;
+        }
+    }
+
     function connectDevice(mode, id, macOrSsid, password) {
         window.connectingId = id;
         window.failedId = "";
@@ -257,6 +315,14 @@ Item {
             connectProcess.command = ["bash", "-c", window.scriptsDir + "/bluetooth_panel_logic.sh --connect '" + macOrSsid + "'"];
         }
         connectProcess.running = true;
+    }
+
+    function forgetWifiNetwork(ssid) {
+        let name = (ssid || "").trim();
+        if (name === "") return;
+        forgetWifiProcess.targetSsid = name;
+        forgetWifiProcess.running = false;
+        forgetWifiProcess.running = true;
     }
 
     property var currentCores: [null, null, null, null, null]
@@ -317,7 +383,7 @@ Item {
     }
 
     onCurrentConnChanged: {
-        showInfoView = currentConn;
+        showInfoView = currentConn && !showSavedWifiView;
         if (currentConn) updateInfoNodes();
     }
 
@@ -327,7 +393,8 @@ Item {
         }
         window.ignoreNextModeFileUpdate = false;
         
-        window.pendingWifiId = ""; window.pendingWifiSsid = "";
+        window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
+        window.showSavedWifiView = false;
         if (window.activeMode === "wifi") savedNetworksFetcher.running = true;
 
         infoListModel.clear();
@@ -478,6 +545,28 @@ Item {
                     } else if (window.speedtestStatus !== "") {
                         nodes.push({ id: "spd_wait_" + i, name: window.speedtestStatus, icon: "󱤅", action: "Speed Test", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     }
+                    if (obj.ssid && obj.ssid !== "") {
+                        nodes.push({
+                            id: "forget_" + i,
+                            name: obj.ssid,
+                            icon: "󰆴",
+                            action: "Forget Network",
+                            isInfoNode: true,
+                            isActionable: true,
+                            cmdStr: "FORGET_WIFI::" + obj.ssid,
+                            parentIndex: cIndex
+                        });
+                    }
+                    nodes.push({
+                        id: "saved_wifi_view",
+                        name: "Saved Networks",
+                        icon: "󰒓",
+                        action: "Open List",
+                        isInfoNode: true,
+                        isActionable: true,
+                        cmdStr: "OPEN_SAVED_WIFI_VIEW",
+                        parentIndex: cIndex
+                    });
                 } else {
                     nodes.push({ id: "bat_" + obj.mac, name: (obj.battery || "0") + "%", icon: "󰥉", action: "Battery", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     if (obj.profile) {
@@ -543,8 +632,12 @@ Item {
 
             newNetworks.sort((a, b) => a.id.localeCompare(b.id));
 
-            if (isNowWifiConn && window.activeMode === "wifi") {
+            if (window.activeMode === "wifi") {
                 newNetworks.push({ id: "action_settings", ssid: "Current Device", mac: "", name: "Current Device", icon: "󰒓", security: "", action: "View Info", isInfoNode: false, isActionable: true, cmdStr: "TOGGLE_VIEW", parentIndex: -1 });
+                newNetworks.push({ id: "action_saved", ssid: "", mac: "", name: "Saved Networks", icon: "󰇚", security: "", action: "Manage", isInfoNode: false, isActionable: true, cmdStr: "OPEN_SAVED_WIFI_VIEW", parentIndex: -1 });
+                if (isNowWifiConn && newConnected && newConnected.ssid) {
+                    newNetworks.push({ id: "action_forget_current", ssid: "", mac: "", name: "Forget Current", icon: "󰆴", security: "", action: "Manage", isInfoNode: false, isActionable: true, cmdStr: "FORGET_WIFI::" + newConnected.ssid, parentIndex: -1 });
+                }
             }
 
             if (JSON.stringify(window.wifiList) !== JSON.stringify(newNetworks)) {
@@ -553,7 +646,7 @@ Item {
             }
 
             if (window.activeMode === "wifi") {
-                if (!wasWifiConn && isNowWifiConn) {
+                if (!wasWifiConn && isNowWifiConn && !window.showSavedWifiView) {
                     window.showInfoView = true;
                 }
                 
@@ -627,7 +720,7 @@ Item {
             }
 
             if (window.activeMode === "bt") {
-                if (newBtConnected.length > oldBtLen) {
+                if (newBtConnected.length > oldBtLen && !window.showSavedWifiView) {
                     window.showInfoView = true;
                 }
 
@@ -664,7 +757,7 @@ Item {
                     if (Object.keys(window.busyTasks).length === 0 && Object.keys(window.disconnectingDevices).length === 0) busyTimeout.stop();
                 }
 
-                if (isNowBtConn || window.isWifiConn) window.updateInfoNodes();
+                if ((isNowBtConn || window.isWifiConn) && !window.showSavedWifiView) window.updateInfoNodes();
             }
         } catch(e) {}
     }
@@ -797,7 +890,7 @@ Item {
                 anchors.fill: parent
                 anchors.bottomMargin: window.s(80)
                 z: 0 
-                opacity: (window.currentConn && window.showInfoView && window.currentPower) ? 1.0 : 0.0
+                opacity: (window.currentConn && window.showInfoView && window.currentPower && !window.showSavedWifiView) ? 1.0 : 0.0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: 500 } }
                 
@@ -815,7 +908,7 @@ Item {
                 Connections {
                     target: window
                     function onGlobalOrbitAngleChanged() { 
-                        if (window.currentConn && window.showInfoView && window.currentPower) nodeLinesCanvas.requestPaint() 
+                        if (window.currentConn && window.showInfoView && window.currentPower && !window.showSavedWifiView) nodeLinesCanvas.requestPaint() 
                     }
                 }
                 
@@ -823,7 +916,7 @@ Item {
                     var ctx = getContext("2d");
                     var s = window.s;
                     ctx.clearRect(0, 0, width, height);
-                    if (!window.currentConn || !window.showInfoView || !window.currentPower) return;
+                    if (!window.currentConn || !window.showInfoView || !window.currentPower || window.showSavedWifiView) return;
                     
                     var time = Date.now() / 1000;
                     ctx.lineJoin = "round";
@@ -1259,13 +1352,23 @@ Item {
                                             font.family: "JetBrains Mono"; font.pixelSize: window.s(13); color: window.text
                                             echoMode: TextInput.Password; clip: true
                                             onAccepted: {
-                                                if (text.trim() !== "") {
-                                                    window.connectDevice("wifi", window.pendingWifiId, window.pendingWifiSsid, text);
-                                                    window.pendingWifiId = ""; window.pendingWifiSsid = ""; text = "";
+                                                let pwd = text.trim();
+                                                if (pwd !== "" || window.pendingWifiAllowEmpty) {
+                                                    window.connectDevice("wifi", window.pendingWifiId, window.pendingWifiSsid, pwd);
+                                                    window.pendingWifiId = "";
+                                                    window.pendingWifiSsid = "";
+                                                    window.pendingWifiAllowEmpty = false;
+                                                    text = "";
                                                     window.forceActiveFocus();
                                                 }
                                             }
-                                            Keys.onEscapePressed: { window.pendingWifiId = ""; window.pendingWifiSsid = ""; text = ""; window.forceActiveFocus(); }
+                                            Keys.onEscapePressed: {
+                                                window.pendingWifiId = "";
+                                                window.pendingWifiSsid = "";
+                                                window.pendingWifiAllowEmpty = false;
+                                                text = "";
+                                                window.forceActiveFocus();
+                                            }
                                         }
                                     }
                                 }
@@ -1443,7 +1546,9 @@ Item {
 
                     Repeater {
                         id: orbitRepeater
-                        model: (window.currentConn && window.showInfoView) ? infoListModel : (window.activeMode === "wifi" ? wifiListModel : btListModel)
+                        model: (window.activeMode === "wifi" && window.showSavedWifiView)
+                            ? savedWifiListModel
+                            : ((window.currentConn && window.showInfoView) ? infoListModel : (window.activeMode === "wifi" ? wifiListModel : btListModel))
                         
                         delegate: Item {
                             id: floatCardDelegateContainer
@@ -1579,7 +1684,11 @@ Item {
                                 
                                 property bool isPairedBT: window.activeMode === "bt" && action === "Connect"
                                 property bool isTargetWifi: window.activeMode === "wifi" && !window.isWifiConn && itemId === window.targetWifiSsid
-                                property bool isSpecialAction: itemId === "action_scan" || itemId === "action_settings"
+                                property bool isSpecialAction: itemId === "action_scan"
+                                    || itemId === "action_settings"
+                                    || itemId === "action_saved"
+                                    || itemId === "action_forget_current"
+                                    || itemId === "action_saved_close"
                                 property bool isHighlighted: isPairedBT || isTargetWifi || isSpecialAction
                                 
                                 property bool isCurrentlyConnected: {
@@ -1907,7 +2016,7 @@ Item {
                                     onPressed: { 
                                         if (floatCard.isInteractable && !floatCard.triggered && !floatCard.isMyBusy && floatCard.fillLevel === 0.0) {
                                             if (window.pendingWifiId !== "") {
-                                                window.pendingWifiId = ""; window.pendingWifiSsid = "";
+                                                window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
                                             }
                                             drainAnim.stop()
                                             fillAnim.start()
@@ -1937,6 +2046,28 @@ Item {
                                         if (cmdStr === "TOGGLE_VIEW") {
                                             window.playSfx("switch.wav");
                                             window.showInfoView = !window.showInfoView;
+                                            window.showSavedWifiView = false;
+                                            floatCard.triggered = false;
+                                            drainAnim.start();
+                                        } else if (cmdStr === "OPEN_SAVED_WIFI_VIEW") {
+                                            window.playSfx("switch.wav");
+                                            window.showSavedWifiView = true;
+                                            window.showInfoView = false;
+                                            savedNetworksFetcher.running = false;
+                                            savedNetworksFetcher.running = true;
+                                            floatCard.triggered = false;
+                                            drainAnim.start();
+                                        } else if (cmdStr === "CLOSE_SAVED_WIFI_VIEW") {
+                                            window.playSfx("switch.wav");
+                                            window.showSavedWifiView = false;
+                                            window.showInfoView = window.currentConn;
+                                            if (window.showInfoView) window.updateInfoNodes();
+                                            floatCard.triggered = false;
+                                            drainAnim.start();
+                                        } else if (cmdStr.startsWith("FORGET_WIFI::")) {
+                                            let ssidToForget = cmdStr.slice("FORGET_WIFI::".length);
+                                            window.forgetWifiNetwork(ssidToForget);
+                                            window.playSfx("switch.wav");
                                             floatCard.triggered = false;
                                             drainAnim.start();
                                         } else if (isInfoNode && cmdStr) {
@@ -1952,9 +2083,10 @@ Item {
                                                 if (window.savedWifiNetworks[i] === ssid) { isSaved = true; break; }
                                             }
 
-                                            if (window.activeMode === "wifi" && isSecure && !isSaved) {
+                                            if (window.activeMode === "wifi" && isSecure) {
                                                 window.pendingWifiSsid = ssid;
                                                 window.pendingWifiId = floatCard.itemId;
+                                                window.pendingWifiAllowEmpty = isSaved;
                                             } else {
                                                 window.connectDevice(window.activeMode, floatCard.itemId, window.activeMode === "wifi" ? ssid : mac, "");
                                             }
@@ -2025,7 +2157,7 @@ Item {
                         MouseArea {
                             id: wifiTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
+                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
                                 if (window.activeMode !== "wifi") window.playSfx("switch.wav");
                                 window.activeMode = "wifi";
                             }
@@ -2063,7 +2195,7 @@ Item {
                         MouseArea {
                             id: btTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
+                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
                                 if (window.activeMode !== "bt") window.playSfx("switch.wav");
                                 window.activeMode = "bt";
                             }
@@ -2101,7 +2233,7 @@ Item {
                         MouseArea {
                             id: audioTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
+                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
                                 window.playSfx("switch.wav");
                                 Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle volume"]);
                             }
@@ -2165,7 +2297,7 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; }
+                        if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
                         if (window.activeMode === "wifi") {
                             if (window.wifiPowerPending) return;
                             window.expectedWifiPower = window.wifiPower === "on" ? "off" : "on";
