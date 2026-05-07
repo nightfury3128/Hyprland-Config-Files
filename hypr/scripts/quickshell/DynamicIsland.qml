@@ -54,6 +54,8 @@ PanelWindow {
     property bool userIsSeeking: false
     property string activeWindowClass: ""
     property string activeWindowTitle: ""
+    // Hyprland fullscreen: 0 none, 1 fullscreen, 2 maximized — hide chrome only for real fullscreen.
+    property bool activeWindowFullscreen: false
     property bool bravePriorityActive: false
     property double braveSuppressUntil: 0
     readonly property bool isSpotifyWindow: (activeWindowClass || "").toLowerCase().indexOf("spotify") >= 0
@@ -1110,18 +1112,25 @@ PanelWindow {
     Process {
         id: activeWindowProc
         command: ["bash", "-c",
-            "hyprctl activewindow -j 2>/dev/null | jq -r '[(.class // \"\"), (.title // \"\")] | @tsv'"]
+            "hyprctl activewindow -j 2>/dev/null | jq -r '[(.class // \"\"), (.title // \"\"), ((.fullscreen // 0) | tostring)] | @tsv'"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let raw = this.text.trim();
                 if (!raw) return;
                 let parts = raw.split("\t");
-                islandWindow.activeWindowClass = parts.length > 0 ? parts[0].trim() : "";
-                islandWindow.activeWindowTitle = parts.length > 1 ? parts.slice(1).join("\t").trim() : "";
+                if (parts.length < 2) return;
+                let fsStr = parts[parts.length - 1].trim();
+                let fs = parseInt(fsStr, 10);
+                if (isNaN(fs)) fs = 0;
+                islandWindow.activeWindowFullscreen = (fs === 1);
+                islandWindow.activeWindowClass = (parts[0] || "").trim();
+                islandWindow.activeWindowTitle = parts.length > 2
+                    ? parts.slice(1, parts.length - 1).join("\t").trim()
+                    : "";
             }
         }
     }
-    Timer { interval: 1000; running: true; repeat: true; triggeredOnStart: true; onTriggered: activeWindowProc.running = true }
+    Timer { interval: 400; running: true; repeat: true; triggeredOnStart: true; onTriggered: activeWindowProc.running = true }
     Timer {
         id: bravePriorityTimer
         interval: 5000
@@ -1232,6 +1241,12 @@ PanelWindow {
         }
         applyContextPage();
     }
+    onActiveWindowFullscreenChanged: {
+        if (activeWindowFullscreen) {
+            expanded = false;
+            hovered = false;
+        }
+    }
 
     // =========================================================
     // --- INPUT MASK ---
@@ -1241,12 +1256,12 @@ PanelWindow {
 
     Item {
         id: maskBounds
-        x: Math.floor((Screen.width - islandShape.width) / 2) - s(14)
+        x: islandWindow.activeWindowFullscreen ? 0 : (Math.floor((Screen.width - islandShape.width) / 2) - s(14))
         y: s(8)
-        width:  islandShape.width + s(28)
+        width: islandWindow.activeWindowFullscreen ? 0 : (islandShape.width + s(28)
                 + (recBubble.shouldShow ? recBubble.width + s(8) : 0)
-                + (islandWindow.notifBadgeVisible ? s(60) : 0)
-        height: Math.max(islandShape.height, s(48)) + s(8)
+                + (islandWindow.notifBadgeVisible ? s(60) : 0))
+        height: islandWindow.activeWindowFullscreen ? 0 : (Math.max(islandShape.height, s(48)) + s(8))
     }
     Region { id: maskedRegion; item: maskBounds }
 
@@ -1299,7 +1314,7 @@ PanelWindow {
         x: Math.floor((Screen.width - width) / 2)
         y: s(8)
 
-        opacity: islandWindow.launcherActive ? 0.0 : 1.0
+        opacity: (islandWindow.launcherActive || islandWindow.activeWindowFullscreen) ? 0.0 : 1.0
         Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
         Behavior on width  { NumberAnimation { duration: 540; easing.type: Easing.OutExpo } }
@@ -1458,7 +1473,7 @@ PanelWindow {
             anchors.rightMargin: -s(14)
             anchors.bottomMargin: -s(8)
             hoverEnabled: true
-            enabled: !islandWindow.expanded
+            enabled: !islandWindow.expanded && !islandWindow.activeWindowFullscreen
             z: 0
 
             onEntered: islandWindow.hovered = true
@@ -1829,7 +1844,7 @@ PanelWindow {
            - ((islandWindow.vpnBadgeVisible || discordBubble.shouldShow) ? (s(42)) : 0)
         y: s(8) + (islandShape.collapsedH - height) / 2
 
-        opacity: islandWindow.stopwatchChipVisible ? 1.0 : 0.0
+        opacity: islandWindow.stopwatchChipVisible && !islandWindow.activeWindowFullscreen ? 1.0 : 0.0
         visible: opacity > 0.001
         scale: islandWindow.stopwatchChipVisible ? 1.0 : 0.6
         transformOrigin: Item.Right
@@ -1885,7 +1900,7 @@ PanelWindow {
            + (islandWindow.notifBadgeVisible ? s(44) : 0)
         y: s(8) + (islandShape.collapsedH - height) / 2
 
-        opacity: islandWindow.timerChipVisible ? 1.0 : 0.0
+        opacity: islandWindow.timerChipVisible && !islandWindow.activeWindowFullscreen ? 1.0 : 0.0
         visible: opacity > 0.001
         scale: islandWindow.timerChipVisible ? 1.0 : 0.6
         transformOrigin: Item.Left
@@ -1947,7 +1962,7 @@ PanelWindow {
         y: s(8) + (islandShape.collapsedH - sz) / 2
         width: sz; height: sz
 
-        opacity: islandWindow.notifBadgeVisible && !islandWindow.expanded ? 1.0 : 0.0
+        opacity: islandWindow.notifBadgeVisible && !islandWindow.expanded && !islandWindow.activeWindowFullscreen ? 1.0 : 0.0
         visible: opacity > 0.001
         scale:   islandWindow.notifBadgeVisible && !islandWindow.expanded ? 1.0 : 0.5
         transformOrigin: Item.Left
@@ -2007,7 +2022,7 @@ PanelWindow {
         x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(12) - islandWindow.volLeftExtra
         y: s(8) + (islandShape.collapsedH - badgeH) / 2
 
-        opacity: islandWindow.vpnBadgeVisible && !islandWindow.expanded ? 1.0 : 0.0
+        opacity: islandWindow.vpnBadgeVisible && !islandWindow.expanded && !islandWindow.activeWindowFullscreen ? 1.0 : 0.0
         visible: opacity > 0.001
         scale:   islandWindow.vpnBadgeVisible && !islandWindow.expanded ? 1.0 : 0.5
         transformOrigin: Item.Right
@@ -2070,6 +2085,7 @@ PanelWindow {
         property bool shouldShow: islandWindow.discordInCall
             && islandWindow.currentPage !== "discord"
             && !islandWindow.expanded
+            && !islandWindow.activeWindowFullscreen
 
         x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
         y: s(8) + (islandShape.collapsedH - bubbleH) / 2
@@ -2140,6 +2156,7 @@ PanelWindow {
         property bool shouldShow: islandWindow.isRecording
             && islandWindow.currentPage !== "recording"
             && !islandWindow.expanded
+            && !islandWindow.activeWindowFullscreen
 
         x: Math.floor(Screen.width / 2) + islandShape.collapsedW / 2 + s(12) + islandWindow.volRightExtra
         y: s(8) + (islandShape.collapsedH - bubbleH) / 2
@@ -2235,7 +2252,7 @@ PanelWindow {
                         notifHistory.insert(0, item);
                         islandWindow.saveNotifHistory();
 
-                        if (!islandWindow.dndEnabled) {
+                        if (!islandWindow.dndEnabled && !islandWindow.activeWindowFullscreen) {
                             // Normal: show popup card + sound
                             islandWindow.playSound("notification");
                             islandWindow.notifData            = item;
@@ -2245,6 +2262,8 @@ PanelWindow {
                             islandWindow.currentPage          = "notifs";
                             islandWindow.expanded             = true;
                             notifHideTimer.restart();
+                        } else if (!islandWindow.dndEnabled && islandWindow.activeWindowFullscreen) {
+                            if (!islandWindow.expanded) islandWindow.notifBadgeVisible = true;
                         } else {
                             // DND: silent badge only
                             if (!islandWindow.expanded) islandWindow.notifBadgeVisible = true;
