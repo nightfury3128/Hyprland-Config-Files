@@ -26,7 +26,7 @@ Item {
         sequence: "Tab"
         onActivated: {
             if (window.pendingWifiId !== "") {
-                window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
+                window.clearPendingWifiInput();
                 return;
             }
             window.playSfx("switch.wav");
@@ -87,7 +87,7 @@ Item {
         }
         introState = 1.0;
         
-        if (window.activeMode === "wifi") savedNetworksFetcher.running = true;
+        if (window.activeMode === "wifi") refreshSavedNetworks();
         speedtestStateReader.running = true;
     }
 
@@ -99,6 +99,17 @@ Item {
             let cmd = "pw-play '" + cleanPath + "' 2>/dev/null || paplay '" + cleanPath + "' 2>/dev/null";
             Quickshell.execDetached(["sh", "-c", cmd]);
         } catch(e) {}
+    }
+
+    function clearPendingWifiInput() {
+        pendingWifiId = "";
+        pendingWifiSsid = "";
+        pendingWifiAllowEmpty = false;
+    }
+
+    function refreshSavedNetworks() {
+        savedNetworksFetcher.running = false;
+        savedNetworksFetcher.running = true;
     }
 
     MatugenColors { id: _theme }
@@ -289,7 +300,7 @@ Item {
         property string targetSsid: ""
         command: ["bash", "-c", "nmcli connection delete " + JSON.stringify(targetSsid)]
         onExited: {
-            savedNetworksFetcher.running = true;
+            refreshSavedNetworks();
             if (window.activeMode === "wifi") wifiPoller.running = true;
         }
     }
@@ -393,9 +404,9 @@ Item {
         }
         window.ignoreNextModeFileUpdate = false;
         
-        window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
+        window.clearPendingWifiInput();
         window.showSavedWifiView = false;
-        if (window.activeMode === "wifi") savedNetworksFetcher.running = true;
+        if (window.activeMode === "wifi") refreshSavedNetworks();
 
         infoListModel.clear();
         window.busyTasks = ({});
@@ -2015,9 +2026,7 @@ Item {
                                     
                                     onPressed: { 
                                         if (floatCard.isInteractable && !floatCard.triggered && !floatCard.isMyBusy && floatCard.fillLevel === 0.0) {
-                                            if (window.pendingWifiId !== "") {
-                                                window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false;
-                                            }
+                                            if (window.pendingWifiId !== "") window.clearPendingWifiInput();
                                             drainAnim.stop()
                                             fillAnim.start()
                                         }
@@ -2053,8 +2062,7 @@ Item {
                                             window.playSfx("switch.wav");
                                             window.showSavedWifiView = true;
                                             window.showInfoView = false;
-                                            savedNetworksFetcher.running = false;
-                                            savedNetworksFetcher.running = true;
+                                            refreshSavedNetworks();
                                             floatCard.triggered = false;
                                             drainAnim.start();
                                         } else if (cmdStr === "CLOSE_SAVED_WIFI_VIEW") {
@@ -2157,7 +2165,7 @@ Item {
                         MouseArea {
                             id: wifiTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
+                                if (window.pendingWifiId !== "") window.clearPendingWifiInput();
                                 if (window.activeMode !== "wifi") window.playSfx("switch.wav");
                                 window.activeMode = "wifi";
                             }
@@ -2195,7 +2203,7 @@ Item {
                         MouseArea {
                             id: btTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
+                                if (window.pendingWifiId !== "") window.clearPendingWifiInput();
                                 if (window.activeMode !== "bt") window.playSfx("switch.wav");
                                 window.activeMode = "bt";
                             }
@@ -2233,7 +2241,7 @@ Item {
                         MouseArea {
                             id: audioTabMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
+                                if (window.pendingWifiId !== "") window.clearPendingWifiInput();
                                 window.playSfx("switch.wav");
                                 Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle volume"]);
                             }
@@ -2297,7 +2305,7 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        if (window.pendingWifiId !== "") { window.pendingWifiId = ""; window.pendingWifiSsid = ""; window.pendingWifiAllowEmpty = false; }
+                        if (window.pendingWifiId !== "") window.clearPendingWifiInput();
                         if (window.activeMode === "wifi") {
                             if (window.wifiPowerPending) return;
                             window.expectedWifiPower = window.wifiPower === "on" ? "off" : "on";

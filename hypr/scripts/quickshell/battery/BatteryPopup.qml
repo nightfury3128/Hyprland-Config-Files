@@ -178,7 +178,7 @@ Item {
                     window.sysTemp = parseInt(lines[3]) || 0;
                     widgetCache.sysTemp = window.sysTemp;
 
-                    window.powerProfile = lines[4];
+                    window.powerProfile = lines[4].trim();
                     widgetCache.powerProfile = window.powerProfile;
 
                     let upParts = lines[5].split("h ");
@@ -1037,6 +1037,7 @@ Item {
                             
                             Rectangle {
                                 id: sliderPill
+                                z: 0
                                 width: (parent.width - window.s(2)) / 3 
                                 height: parent.height - window.s(2)
                                 y: window.s(1)
@@ -1057,17 +1058,22 @@ Item {
                             }
 
                             RowLayout {
+                                z: 1
                                 anchors.fill: parent
                                 spacing: 0
                                 
                                 Repeater {
                                     model: ListModel {
-                                        ListElement { name: "performance"; icon: "󰓅"; label: "Perform" } 
-                                        ListElement { name: "balanced"; icon: "󰗑"; label: "Balance" }   
-                                        ListElement { name: "power-saver"; icon: "󰌪"; label: "Saver" } 
+                                        ListElement { profile: "performance"; icon: "󰓅"; label: "Perform" }
+                                        ListElement { profile: "balanced"; icon: "󰗑"; label: "Balance" }
+                                        ListElement { profile: "power-saver"; icon: "󰌪"; label: "Saver" }
                                     }
                                     
                                     delegate: Item {
+                                        required property string profile
+                                        required property string icon
+                                        required property string label
+
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
                                         
@@ -1076,13 +1082,13 @@ Item {
                                             spacing: window.s(8)
                                             Text {
                                                 font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18)
-                                                color: window.powerProfile === name ? window.crust : (profileMa.containsMouse ? window.text : window.subtext0)
+                                                color: window.powerProfile === profile ? window.crust : (profileMa.containsMouse ? window.text : window.subtext0)
                                                 text: icon
                                                 Behavior on color { ColorAnimation { duration: 200 } }
                                             }
                                             Text {
                                                 font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(13)
-                                                color: window.powerProfile === name ? window.crust : (profileMa.containsMouse ? window.text : window.subtext0)
+                                                color: window.powerProfile === profile ? window.crust : (profileMa.containsMouse ? window.text : window.subtext0)
                                                 text: label
                                                 Behavior on color { ColorAnimation { duration: 200 } }
                                             }
@@ -1092,16 +1098,23 @@ Item {
                                             id: profileMa
                                             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                             onClicked: {
+                                                window.powerProfile = profile;
+                                                widgetCache.powerProfile = profile;
                                                 Quickshell.execDetached([
-                                                    "bash",
-                                                    "-c",
-                                                    "powerprofilesctl set '" + name + "' 2>/dev/null || notify-send -u low 'Power Profile' 'Failed to switch to " + name + "'"
+                                                    "bash", "-c",
+                                                    "$HOME/.config/hypr/scripts/power-profile.sh '" + profile + "'"
                                                 ]);
-                                                sysPoller.running = true;
+                                                profileRefreshTimer.restart();
                                             }
                                         }
                                     }
                                 }
+                            }
+
+                            Timer {
+                                id: profileRefreshTimer
+                                interval: 600
+                                onTriggered: sysPoller.running = true
                             }
                         }
                     }
