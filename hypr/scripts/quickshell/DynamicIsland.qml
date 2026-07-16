@@ -14,7 +14,10 @@ PanelWindow {
     id: islandWindow
 
     WlrLayershell.namespace: "qs-island"
-    WlrLayershell.layer: WlrLayer.Top
+    // Overlay sits above TopBar (Top). Same-layer stacking across separate
+    // quickshell processes is unreliable after restarts, so the island must
+    // not share Top with the bar or clicks land on the empty center spacer.
+    WlrLayershell.layer: WlrLayer.Overlay
 
     anchors { top: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
@@ -823,7 +826,7 @@ PanelWindow {
     // Clock timezone source (derived from dynamic location weather script)
     Process {
         id: timezoneProc
-        command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/calendar/weather.sh --timezone 2>/dev/null || true"]
+        command: ["bash", "-c", "~/.config/hypr/scripts/geo_timezone.sh --timezone 2>/dev/null || true"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let tz = this.text.trim();

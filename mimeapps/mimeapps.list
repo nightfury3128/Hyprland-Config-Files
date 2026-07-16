@@ -2,3 +2,4 @@
 [Default Applications]
 x-scheme-handler/claude=com.anthropic.claude-desktop.desktop
 x-scheme-handler/mailto=brave-browser.desktop
+x-scheme-handler/antigravity=antigravity.desktop

@@ -85,7 +85,8 @@ resolve_location() {
     if [ -f "$location_cache_file" ] && command -v jq >/dev/null 2>&1; then
         resolved_lat=$(jq -r '.latitude // .lat // empty' "$location_cache_file" 2>/dev/null)
         resolved_lon=$(jq -r '.longitude // .lon // empty' "$location_cache_file" 2>/dev/null)
-        resolved_tz=$(jq -r '.timezone // empty' "$location_cache_file" 2>/dev/null)
+        # ipapi.co uses a string timezone; ipwho.is nests timezone as { "id": "Asia/Kolkata", ... }
+        resolved_tz=$(jq -r 'if (.timezone | type) == "string" then .timezone elif (.timezone | type) == "object" then (.timezone.id // empty) else empty end' "$location_cache_file" 2>/dev/null)
         resolved_city=$(jq -r '.city // empty' "$location_cache_file" 2>/dev/null)
     fi
 }

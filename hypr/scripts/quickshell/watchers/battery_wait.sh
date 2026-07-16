@@ -1,14 +1,36 @@
 #!/usr/bin/env bash
+# Wake the battery poller when capacity/status changes.
+# Capacity updates often skip udev events, so we poll sysfs and also listen to udev.
 PIPE="/tmp/qs_battery_wait_$$.fifo"
 mkfifo "$PIPE" 2>/dev/null
 trap 'rm -f "$PIPE"; kill $(jobs -p) 2>/dev/null; exit 0' EXIT INT TERM
 
-# Catch instant AC plug/unplug events
-udevadm monitor --subsystem-match=power_supply 2>/dev/null | grep --line-buffered "change" > "$PIPE" &
+read_bat() {
+    local percent status
+    percent=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -n1)
+    status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -n1)
+    echo "${percent:-?}|${status:-?}"
+}
 
-# Failsafe: Force a refresh every 90 seconds because the kernel doesn't
-# always broadcast a udev event when the battery drops by 1% naturally.
-(sleep 90 && echo "timeout" > "$PIPE") &
+# Exit as soon as capacity or charging status changes
+(
+    prev=$(read_bat)
+    while true; do
+        sleep 2
+        cur=$(read_bat)
+        if [ "$cur" != "$prev" ]; then
+            echo "changed" > "$PIPE"
+            exit 0
+        fi
+    done
+) &
+
+# Instant wake on AC plug/unplug and other power_supply uevents
+udevadm monitor --subsystem-match=power_supply 2>/dev/null \
+    | grep --line-buffered "change" > "$PIPE" &
+
+# Hard ceiling so a stuck waiter can't freeze the bar forever
+(sleep 30 && echo "timeout" > "$PIPE") &
 
 read -r _ < "$PIPE"
 sleep 0.05

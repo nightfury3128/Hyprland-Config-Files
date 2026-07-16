@@ -1,0 +1,16 @@
+{
+  "name": "Bass Boost",
+  "bands": [
+    6,
+    7,
+    5,
+    2,
+    1,
+    0,
+    0,
+    0,
+    1,
+    2
+  ],
+  "builtin": true
+}

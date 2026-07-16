@@ -304,7 +304,7 @@ PanelWindow {
                 // Popup-like widgets should originate near the top-right bar button,
                 // while island-style widgets keep the center-origin animation.
                 let initialLayout = getLayout(newWidget);
-                if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume")) {
+                if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume" || newWidget === "librepods")) {
                     masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(Screen.width, masterWindow.globalUiScale));
                     masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(Screen.width, masterWindow.globalUiScale));
                 } else {

@@ -1,0 +1,16 @@
+{
+  "name": "Electronic",
+  "bands": [
+    5,
+    4,
+    2,
+    0,
+    -1,
+    1,
+    3,
+    4,
+    5,
+    4
+  ],
+  "builtin": true
+}

@@ -25,6 +25,7 @@ function getLayout(name, mx, my, mw, mh, userScale) {
         // Right-aligned: pinned 20px from the right edge dynamically
         "battery":   { w: s(801, scale), h: s(760, scale), rx: mw - s(821, scale), ry: s(70, scale), comp: "battery/BatteryPopup.qml" },
         "volume":    { w: s(860, scale), h: s(760, scale), rx: mw - s(880, scale), ry: s(70, scale), comp: "volume/VolumePopup.qml" },
+        "librepods": { w: s(420, scale), h: s(520, scale), rx: mw - s(440, scale), ry: s(70, scale), comp: "librepods/LibrePodsPopup.qml" },
         
         // Centered horizontally dynamically based on current screen width
         "calendar":  { w: s(1450, scale), h: s(750, scale), rx: Math.floor((mw/2)-(s(1450, scale)/2)), ry: s(70, scale), comp: "calendar/CalendarPopup.qml" },

@@ -64,7 +64,7 @@ Item {
         property real sysBrightness: 0
         property string currentUserName: "User"
         property int batHealth: 0
-        property int batCycles: 0
+        property int gpuUsage: 0
     }
 
     // -------------------------------------------------------------------------
@@ -84,45 +84,42 @@ Item {
     
     property string currentUserName: widgetCache.currentUserName
     property int batHealth: widgetCache.batHealth
-    property int batCycles: widgetCache.batCycles
+    property int gpuUsage: widgetCache.gpuUsage
 
     property bool isDraggingBri: false
     Timer { id: briSyncDelay; interval: 800; onTriggered: window.isDraggingBri = false; triggeredOnStart: true; }
 
-    // Battery live data (read from sysfs, independent of the system stats poller)
+    // Same fetch/wait path as TopBar (watchers/battery_{fetch,wait}.sh)
     property int batPercent: 0
     property string batStatus: "Unknown"
+    property string batIcon: "󰁹"
     readonly property bool batCharging: batStatus === "Charging" || batStatus === "Full"
 
     Process {
         id: batteryPoller
-        command: ["bash", "-c",
-            "bat=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -n1); " +
-            "[ -z \"$bat\" ] && { echo 0; echo Unknown; echo 0; echo 0; exit 0; }; " +
-            "cap=$(cat \"$bat/capacity\" 2>/dev/null || echo 0); " +
-            "status=$(cat \"$bat/status\" 2>/dev/null || echo Unknown); " +
-            "cycles=$(cat \"$bat/cycle_count\" 2>/dev/null || echo 0); " +
-            "full=$(cat \"$bat/energy_full\" 2>/dev/null || cat \"$bat/charge_full\" 2>/dev/null || echo 0); " +
-            "design=$(cat \"$bat/energy_full_design\" 2>/dev/null || cat \"$bat/charge_full_design\" 2>/dev/null || echo 0); " +
-            "health=0; [ \"$design\" -gt 0 ] 2>/dev/null && health=$(( full * 100 / design )); " +
-            "echo \"$cap\"; echo \"$status\"; echo \"$health\"; echo \"$cycles\""
-        ]
         running: true
+        command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_fetch.sh"]
         stdout: StdioCollector {
             onStreamFinished: {
-                let lines = this.text.trim().split("\n");
-                window.batPercent = parseInt(lines[0]) || 0;
-                window.batStatus = lines.length >= 2 ? lines[1].trim() : "Unknown";
-                window.batHealth = lines.length >= 3 ? (parseInt(lines[2]) || 0) : 0;
-                widgetCache.batHealth = window.batHealth;
-                window.batCycles = lines.length >= 4 ? (parseInt(lines[3]) || 0) : 0;
-                widgetCache.batCycles = window.batCycles;
+                let txt = this.text.trim();
+                if (txt !== "") {
+                    try {
+                        let data = JSON.parse(txt);
+                        window.batPercent = parseInt(data.percent) || 0;
+                        window.batStatus = data.status || "Unknown";
+                        window.batIcon = data.icon || window.batIcon;
+                        window.batHealth = parseInt(data.health) || 0;
+                        widgetCache.batHealth = window.batHealth;
+                    } catch (e) { console.warn(e) }
+                }
+                batteryWaiter.running = true;
             }
         }
     }
-    Timer {
-        interval: 30000; running: true; repeat: true; triggeredOnStart: true;
-        onTriggered: batteryPoller.running = true
+    Process {
+        id: batteryWaiter
+        command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_wait.sh"]
+        onExited: batteryPoller.running = true
     }
 
     // Unified hue for Performance Profile
@@ -159,13 +156,15 @@ Item {
             "temp=$(sensors 2>/dev/null | grep -m 1 -E 'Package id 0|Tctl|Tdie|edge|temp1' | grep -oE '\\+[0-9]+\\.[0-9]+' | head -n 1 | tr -d '+' | cut -d. -f1); [ -z \"$temp\" ] && temp=$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -n 1 | awk '{print int($1/1000)}'); echo \"${temp:-0}\"; " +
             "powerprofilesctl get 2>/dev/null || echo 'balanced'; " +
             "awk '{print int($1/3600)\"h \"int(($1%3600)/60)\"m\"}' /proc/uptime 2>/dev/null || echo '0h 0m'; " +
-            "$HOME/.config/hypr/scripts/brightness.sh 2>/dev/null || echo '0'"
+            "$HOME/.config/hypr/scripts/brightness.sh 2>/dev/null || echo '0'; " +
+            "gpu=0; if command -v nvidia-smi >/dev/null 2>&1; then gpu=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9'); " +
+            "elif f=$(find /sys/class/drm -name gpu_busy_percent 2>/dev/null | head -n1); [ -n \"$f\" ]; then gpu=$(cat \"$f\" 2>/dev/null); fi; echo \"${gpu:-0}\""
         ]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
                 let lines = this.text.trim().split("\n");
-                if (lines.length >= 7) {
+                if (lines.length >= 8) {
                     window.cpuUsage = parseInt(lines[0]) || 0;
                     widgetCache.cpuUsage = window.cpuUsage;
 
@@ -193,6 +192,9 @@ Item {
                         window.sysBrightness = parseInt(lines[6]) || 0;
                         widgetCache.sysBrightness = window.sysBrightness;
                     }
+
+                    window.gpuUsage = parseInt(lines[7]) || 0;
+                    widgetCache.gpuUsage = window.gpuUsage;
                 }
             }
         }
@@ -418,16 +420,7 @@ Item {
                             font.pixelSize: window.s(22)
                             color: parent.batColor
                             Behavior on color { ColorAnimation { duration: 300 } }
-                            text: window.batCharging            ? "󰂄" :
-                                  window.batPercent >= 90       ? "󰁹" :
-                                  window.batPercent >= 80       ? "󰂂" :
-                                  window.batPercent >= 70       ? "󰂁" :
-                                  window.batPercent >= 60       ? "󰂀" :
-                                  window.batPercent >= 50       ? "󰁿" :
-                                  window.batPercent >= 40       ? "󰁾" :
-                                  window.batPercent >= 30       ? "󰁽" :
-                                  window.batPercent >= 20       ? "󰁼" :
-                                  window.batPercent >= 10       ? "󰁻" : "󰁺"
+                            text: window.batIcon
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
@@ -717,22 +710,48 @@ Item {
                             }
                         }
 
+                        // 6. GPU Orb
                         Item {
-                            width: window.s(145); height: window.s(145)
+                            id: gpuOrb; width: window.s(145); height: window.s(145)
+                            property real animVal: window.gpuUsage
+                            Behavior on animVal { NumberAnimation { duration: 1200; easing.type: Easing.OutQuint } }
+                            onAnimValChanged: gpuCanvas.requestPaint()
+
+                            scale: gpuMa.containsMouse ? 1.05 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 400; easing.type: Easing.OutExpo } }
+
                             Rectangle {
-                                anchors.fill: parent
-                                radius: width / 2
-                                color: window.surface0
-                                border.color: window.surface1
-                                border.width: 1
+                                anchors.centerIn: parent
+                                width: parent.width + (gpuMa.containsMouse ? window.s(16) : window.s(4))
+                                height: width; radius: width / 2
+                                color: window.teal
+                                opacity: gpuMa.containsMouse ? 0.25 : 0.08
+                                Behavior on width { NumberAnimation { duration: 400; easing.type: Easing.OutExpo } }
+                                Behavior on opacity { NumberAnimation { duration: 300 } }
+                            }
+
+                            Canvas {
+                                id: gpuCanvas; anchors.fill: parent; rotation: 180
+                                onPaint: {
+                                    var ctx = getContext("2d"); ctx.clearRect(0, 0, width, height);
+                                    var cX = width/2; var cY = height/2; var rad = (width/2)-window.s(8);
+                                    var eA = (Math.min(100, Math.max(0, parent.animVal)) / 100) * 2 * Math.PI;
+                                    ctx.lineCap = "round"; ctx.lineWidth = window.s(8); ctx.beginPath(); ctx.arc(cX, cY, rad, 0, 2*Math.PI);
+                                    ctx.strokeStyle = window.surface0.toString(); ctx.stroke();
+                                    var grad = ctx.createLinearGradient(0, height, width, 0); grad.addColorStop(0, window.teal.toString()); grad.addColorStop(1, window.green.toString());
+                                    ctx.lineWidth = window.s(14); ctx.beginPath(); ctx.arc(cX, cY, rad, 0, eA); ctx.strokeStyle = grad; ctx.stroke();
+                                }
                             }
                             ColumnLayout {
-                                anchors.centerIn: parent
-                                spacing: window.s(4)
-                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18); color: window.yellow; text: "󰂐" }
-                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(28); color: window.text; text: window.batCycles.toString() }
-                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: window.s(12); color: window.subtext0; text: "CYCLES" }
+                                anchors.centerIn: parent; spacing: 0
+                                RowLayout {
+                                    Layout.alignment: Qt.AlignHCenter; spacing: window.s(4)
+                                    Text { font.family: "Iosevka Nerd Font"; font.pixelSize: window.s(18); color: window.teal; text: "󰢮" }
+                                    Text { font.family: "JetBrains Mono"; font.weight: Font.Black; font.pixelSize: window.s(28); color: window.text; text: Math.round(gpuOrb.animVal) + "%" }
+                                }
+                                Text { Layout.alignment: Qt.AlignHCenter; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: window.s(12); color: window.subtext0; text: "GPU LOAD" }
                             }
+                            MouseArea { id: gpuMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor }
                         }
                     }
 

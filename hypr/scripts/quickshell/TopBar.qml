@@ -135,6 +135,15 @@ Variants {
             property string btStatus: "Off"
             property string btIcon: "󰂲"
             property string btDevice: ""
+
+            // LibrePods / AirPods (smart-swaps with BT pill when active)
+            property bool podsActive: false
+            property bool podsConnected: false
+            property string podsLabel: ""
+            property string podsIcon: "󱡏"
+            property string podsNoiseIcon: "󰓃"
+            property string podsNoise: "off"
+            property string podsName: ""
             
             property string volPercent: "0%"
             property string volIcon: "󰕾"
@@ -155,6 +164,7 @@ Variants {
             property bool isWifiOn: barWindow.wifiStatus.toLowerCase() === "enabled" || barWindow.wifiStatus.toLowerCase() === "on"
             property bool isBtOn: barWindow.btStatus.toLowerCase() === "enabled" || barWindow.btStatus.toLowerCase() === "on"
             property bool showEthernet: barWindow.isDesktop && !barWindow.isWifiOn
+            property bool showPodsPill: barWindow.podsActive
             
             property bool isSoundActive: !barWindow.isMuted && parseInt(barWindow.volPercent) > 0
             property int batCap: parseInt(barWindow.batPercent) || 0
@@ -379,6 +389,31 @@ Variants {
                 }
             }
             Process { id: btWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/bt_wait.sh"]; onExited: btPoller.running = true }
+
+            // --- LIBREPODS (AirPods) ---
+            Process {
+                id: podsPoller; running: true
+                command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/librepods_fetch.sh"]
+                stdout: StdioCollector {
+                    onStreamFinished: {
+                        let txt = this.text.trim();
+                        if (txt !== "") {
+                            try {
+                                let data = JSON.parse(txt);
+                                if (barWindow.podsActive !== !!data.active) barWindow.podsActive = !!data.active;
+                                if (barWindow.podsConnected !== !!data.connected) barWindow.podsConnected = !!data.connected;
+                                if (barWindow.podsLabel !== data.label) barWindow.podsLabel = data.label || "";
+                                if (barWindow.podsIcon !== data.icon) barWindow.podsIcon = data.icon || "󱡏";
+                                if (barWindow.podsNoiseIcon !== data.noise_icon) barWindow.podsNoiseIcon = data.noise_icon || "󰓃";
+                                if (barWindow.podsNoise !== data.noise) barWindow.podsNoise = data.noise || "off";
+                                if (barWindow.podsName !== data.name) barWindow.podsName = data.name || "";
+                            } catch(e) { console.warn(e) }
+                        }
+                        podsWaiter.running = true;
+                    }
+                }
+            }
+            Process { id: podsWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/librepods_wait.sh"]; onExited: podsPoller.running = true }
 
             // --- BATTERY ---
             Process {
@@ -833,10 +868,11 @@ Variants {
                                 MouseArea { id: wifiMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network wifi"]) }
                             }
 
-                            // Bluetooth
+                            // Bluetooth / LibrePods (smart-swap)
                             Rectangle {
                                 id: btPill
                                 property bool isHovered: btMouse.containsMouse
+                                property bool podsMode: barWindow.showPodsPill
                                 radius: barWindow.s(10); height: sysLayout.pillHeight
                                 clip: true
                                 color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4)
@@ -844,7 +880,7 @@ Variants {
                                 Rectangle {
                                     anchors.fill: parent
                                     radius: barWindow.s(10)
-                                    opacity: barWindow.isBtOn ? 1.0 : 0.0
+                                    opacity: (btPill.podsMode ? barWindow.podsActive : barWindow.isBtOn) ? 1.0 : 0.0
                                     Behavior on opacity { NumberAnimation { duration: 300 } }
                                     gradient: Gradient {
                                         orientation: Gradient.Horizontal
@@ -870,18 +906,42 @@ Variants {
 
                                 Row { 
                                     id: btLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
-                                    Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.btIcon; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: barWindow.isBtOn ? mocha.base : mocha.subtext0 }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: btPill.podsMode ? barWindow.podsIcon : barWindow.btIcon
+                                        font.family: "Iosevka Nerd Font"
+                                        font.pixelSize: barWindow.s(16)
+                                        color: (btPill.podsMode ? barWindow.podsActive : barWindow.isBtOn) ? mocha.base : mocha.subtext0
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: btPill.podsMode
+                                        text: barWindow.podsNoiseIcon
+                                        font.family: "Iosevka Nerd Font"
+                                        font.pixelSize: barWindow.s(14)
+                                        color: mocha.base
+                                    }
                                     Text { 
                                         id: btText
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: barWindow.btDevice
+                                        text: btPill.podsMode ? barWindow.podsLabel : barWindow.btDevice
                                         visible: !barWindow.compactRightPills && text !== ""; 
                                         font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; 
-                                        color: barWindow.isBtOn ? mocha.base : mocha.text; 
+                                        color: (btPill.podsMode ? barWindow.podsActive : barWindow.isBtOn) ? mocha.base : mocha.text; 
                                         width: Math.min(implicitWidth, barWindow.s(100)); elide: Text.ElideRight 
                                     }
                                 }
-                                MouseArea { id: btMouse; hoverEnabled: true; anchors.fill: parent; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network bt"]) }
+                                MouseArea {
+                                    id: btMouse
+                                    hoverEnabled: true
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (btPill.podsMode)
+                                            Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle librepods"])
+                                        else
+                                            Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle network bt"])
+                                    }
+                                }
                             }
 
                             // Volume

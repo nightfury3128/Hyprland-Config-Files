@@ -1,7 +1,8 @@
-
-# Battery/internal-panel test: expose only the Intel GPU to Hyprland
-env = AQ_DRM_DEVICES,/dev/dri/card2
-
+env = LIBVA_DRIVER_NAME,nvidia
+env = __GLX_VENDOR_LIBRARY_NAME,nvidia
+env = WLR_NO_HARDWARE_CURSORS,1
+env = WLR_RENDERER,opengl
+env = GBM_BACKEND,nvidia-drm
 
 monitor = eDP-1,preferred,auto,1
 monitor = DP-3,preferred,auto,1
@@ -40,7 +41,6 @@ exec-once = swaybg -i ~/dotfiles/wallpapers/crimson_night.png
 exec-once = pkill -x dunst; pkill -x mako; pkill -x swaync
 exec-once = gnome-keyring-daemon --start --components=secrets
 exec-once = nm-applet --indicator
-exec-once = /home/nipun/librepods/linux/build/librepods --hide
 exec-once = ~/.config/hypr/scripts/qs_manager.sh
 exec-once = steam
 #############################

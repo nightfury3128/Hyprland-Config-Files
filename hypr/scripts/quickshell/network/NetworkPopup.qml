@@ -175,11 +175,23 @@ Item {
 
     Process {
         id: savedNetworksFetcher
-        command: ["bash", "-c", "nmcli -t -f NAME connection show | grep -v 'lo'"]
+        // Collect Wi-Fi profile names and their SSIDs (name can differ from SSID).
+        command: ["bash", "-c",
+            "{" +
+            " nmcli -t -f NAME,TYPE connection show 2>/dev/null" +
+            "   | awk -F: '$2==\"802-11-wireless\"{print $1}';" +
+            " nmcli -t -f UUID,TYPE connection show 2>/dev/null" +
+            "   | awk -F: '$2==\"802-11-wireless\"{print $1}'" +
+            "   | while IFS= read -r uuid; do" +
+            "       nmcli -g 802-11-wireless.ssid connection show uuid \"$uuid\" 2>/dev/null;" +
+            "     done;" +
+            "} | awk 'NF{print}' | sort -u"
+        ]
         stdout: StdioCollector {
             onStreamFinished: {
                 let text = this.text.trim();
-                window.savedWifiNetworks = text ? text.split('\n') : [];
+                let list = text ? text.split('\n') : [];
+                window.savedWifiNetworks = list.map(function(n) { return (n || "").trim(); }).filter(function(n) { return n !== ""; });
                 window.rebuildSavedWifiList();
             }
         }
@@ -320,7 +332,12 @@ Item {
             if (password !== "") {
                 connectProcess.command = ["bash", "-c", "nmcli device wifi connect '" + macOrSsid + "' password '" + password + "'"];
             } else {
-                connectProcess.command = ["bash", "-c", "nmcli device wifi connect '" + macOrSsid + "'"];
+                // Prefer activating an existing profile (saved secrets), then fall back to scan-connect.
+                connectProcess.command = ["bash", "-c",
+                    "nmcli connection up id '" + macOrSsid + "' 2>/dev/null" +
+                    " || nmcli connection up '" + macOrSsid + "' 2>/dev/null" +
+                    " || nmcli device wifi connect '" + macOrSsid + "'"
+                ];
             }
         } else {
             connectProcess.command = ["bash", "-c", window.scriptsDir + "/bluetooth_panel_logic.sh --connect '" + macOrSsid + "'"];
@@ -443,6 +460,7 @@ Item {
             let obj = {
                 id: d.id || "", ssid: d.ssid || "", mac: d.mac || "",
                 name: d.name || d.ssid || "", icon: d.icon || "", security: d.security || "", action: d.action || "",
+                saved: !!d.saved,
                 isInfoNode: d.isInfoNode || false, isActionable: d.isActionable !== undefined ? d.isActionable : false, 
                 cmdStr: d.cmdStr || "", parentIndex: d.parentIndex !== undefined ? d.parentIndex : -1
             };
@@ -2086,17 +2104,24 @@ Item {
                                         } else {
                                             let sec = typeof security !== "undefined" && security ? security.trim().toLowerCase() : "";
                                             let isSecure = sec !== "" && sec !== "open" && sec !== "--" && sec !== "none";
-                                            let isSaved = false;
-                                            for (let i = 0; i < window.savedWifiNetworks.length; i++) {
-                                                if (window.savedWifiNetworks[i] === ssid) { isSaved = true; break; }
+                                            let targetSsid = (typeof ssid !== "undefined" ? ssid : "") || "";
+                                            let isSaved = !!(typeof saved !== "undefined" && saved);
+                                            if (!isSaved) {
+                                                for (let i = 0; i < window.savedWifiNetworks.length; i++) {
+                                                    if ((window.savedWifiNetworks[i] || "").trim() === targetSsid.trim()) {
+                                                        isSaved = true;
+                                                        break;
+                                                    }
+                                                }
                                             }
 
-                                            if (window.activeMode === "wifi" && isSecure) {
-                                                window.pendingWifiSsid = ssid;
+                                            // Known networks already have secrets — connect without a password prompt.
+                                            if (window.activeMode === "wifi" && isSecure && !isSaved) {
+                                                window.pendingWifiSsid = targetSsid;
                                                 window.pendingWifiId = floatCard.itemId;
-                                                window.pendingWifiAllowEmpty = isSaved;
+                                                window.pendingWifiAllowEmpty = false;
                                             } else {
-                                                window.connectDevice(window.activeMode, floatCard.itemId, window.activeMode === "wifi" ? ssid : mac, "");
+                                                window.connectDevice(window.activeMode, floatCard.itemId, window.activeMode === "wifi" ? targetSsid : mac, "");
                                             }
                                         }
                                     }
