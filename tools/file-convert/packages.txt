@@ -1,0 +1,17 @@
+# Arch packages for tools/file-convert
+# Install core with:  sudo pacman -S --needed $(grep -v '^\s*#' packages.txt | awk '$2=="core"{print $1}')
+# Install optional:   sudo pacman -S --needed $(grep -v '^\s*#' packages.txt | awk '$2=="optional"{print $1}')
+
+# name             tier      provides
+libreoffice-fresh  core      # doc/spreadsheet/presentation conversion
+imagemagick        core      # image conversion, compress, resize, images-to-pdf
+ffmpeg             core      # audio/video conversion
+ghostscript        core      # compress-pdf (gs)
+qpdf               core      # merge, split, rotate PDFs
+poppler            core      # pdftotext, pdftoppm, pdfimages
+libnotify          core      # notify-send desktop notifications
+pandoc             core      # pdf-to-docx (text extraction path)
+
+ocrmypdf           optional  # OCR PDFs
+libheif            optional  # HEIC/HEIF input for imagemagick
+libavif            optional  # AVIF read/write for imagemagick

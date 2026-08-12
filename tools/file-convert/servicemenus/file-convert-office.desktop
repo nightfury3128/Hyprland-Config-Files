@@ -1,0 +1,49 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/pdf;application/msword;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.oasis.opendocument.text;application/rtf;application/vnd.ms-powerpoint;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.oasis.opendocument.presentation;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.oasis.opendocument.spreadsheet;
+Actions=OfficeToPdf;OdtToDocx;DocxToOdt;OdpToPptx;PptxToOdp;OdsToXlsx;XlsxToOds;PdfToDocx;
+Name=Convert – Office
+X-KDE-Submenu=Convert – Office
+Icon=document-save-as
+X-KDE-Priority=TopLevel
+
+[Desktop Action OfficeToPdf]
+Name=Convert to PDF
+Icon=application-pdf
+Exec=file-convert office-to-pdf %F
+
+[Desktop Action OdtToDocx]
+Name=ODT → DOCX
+Icon=document-save-as
+Exec=file-convert odt-to-docx %F
+
+[Desktop Action DocxToOdt]
+Name=DOCX → ODT
+Icon=document-save-as
+Exec=file-convert docx-to-odt %F
+
+[Desktop Action OdpToPptx]
+Name=ODP → PPTX
+Icon=document-save-as
+Exec=file-convert odp-to-pptx %F
+
+[Desktop Action PptxToOdp]
+Name=PPTX → ODP
+Icon=document-save-as
+Exec=file-convert pptx-to-odp %F
+
+[Desktop Action OdsToXlsx]
+Name=ODS → XLSX
+Icon=document-save-as
+Exec=file-convert ods-to-xlsx %F
+
+[Desktop Action XlsxToOds]
+Name=XLSX → ODS
+Icon=document-save-as
+Exec=file-convert xlsx-to-ods %F
+
+[Desktop Action PdfToDocx]
+Name=PDF → editable DOCX (lossy)
+Icon=document-edit
+Exec=file-convert pdf-to-docx %F

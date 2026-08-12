@@ -1,0 +1,49 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=image/png;image/jpeg;image/webp;image/avif;image/heif;image/heic;image/tiff;image/bmp;image/gif;image/svg+xml;
+Actions=ImgPng;ImgJpg;ImgWebp;ImgAvif;ImgPdf;ImgCompress;ImgResize50;ImagesToPdf;
+Name=Convert – Images
+X-KDE-Submenu=Convert – Images
+Icon=image-x-generic
+X-KDE-Priority=TopLevel
+
+[Desktop Action ImgPng]
+Name=Convert to PNG
+Icon=image-x-generic
+Exec=file-convert image-to-png %F
+
+[Desktop Action ImgJpg]
+Name=Convert to JPEG
+Icon=image-x-generic
+Exec=file-convert image-to-jpg %F
+
+[Desktop Action ImgWebp]
+Name=Convert to WebP
+Icon=image-x-generic
+Exec=file-convert image-to-webp %F
+
+[Desktop Action ImgAvif]
+Name=Convert to AVIF
+Icon=image-x-generic
+Exec=file-convert image-to-avif %F
+
+[Desktop Action ImgPdf]
+Name=Convert to PDF (per image)
+Icon=application-pdf
+Exec=file-convert image-to-pdf %F
+
+[Desktop Action ImgCompress]
+Name=Compress (copy)
+Icon=archive-extract
+Exec=file-convert compress-image %F
+
+[Desktop Action ImgResize50]
+Name=Resize copy to 50%
+Icon=transform-scale
+Exec=file-convert resize-image-50 %F
+
+[Desktop Action ImagesToPdf]
+Name=Combine selected into one PDF
+Icon=application-pdf
+Exec=file-convert images-to-pdf %F

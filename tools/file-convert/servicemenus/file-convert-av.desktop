@@ -1,0 +1,49 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=audio/mpeg;audio/mp4;audio/ogg;audio/flac;audio/opus;audio/wav;audio/x-wav;audio/x-m4a;audio/aac;video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;
+Actions=AudMp3;AudFlac;AudOpus;VidMp4;VidWebm;VidCompress;ExtractAudio;VidGif;
+Name=Convert – Audio/Video
+X-KDE-Submenu=Convert – Audio/Video
+Icon=video-x-generic
+X-KDE-Priority=TopLevel
+
+[Desktop Action AudMp3]
+Name=Audio → MP3
+Icon=audio-x-generic
+Exec=file-convert audio-to-mp3 %F
+
+[Desktop Action AudFlac]
+Name=Audio → FLAC
+Icon=audio-x-generic
+Exec=file-convert audio-to-flac %F
+
+[Desktop Action AudOpus]
+Name=Audio → Opus
+Icon=audio-x-generic
+Exec=file-convert audio-to-opus %F
+
+[Desktop Action VidMp4]
+Name=Video → MP4 (H.264/AAC)
+Icon=video-x-generic
+Exec=file-convert video-to-mp4 %F
+
+[Desktop Action VidWebm]
+Name=Video → WebM (VP9/Opus)
+Icon=video-x-generic
+Exec=file-convert video-to-webm %F
+
+[Desktop Action VidCompress]
+Name=Compress video
+Icon=archive-extract
+Exec=file-convert compress-video %F
+
+[Desktop Action ExtractAudio]
+Name=Extract audio track
+Icon=audio-x-generic
+Exec=file-convert extract-audio %F
+
+[Desktop Action VidGif]
+Name=Video → GIF
+Icon=image-gif
+Exec=file-convert video-to-gif %F

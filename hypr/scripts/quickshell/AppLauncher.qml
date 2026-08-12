@@ -90,16 +90,16 @@ PanelWindow {
         filteredModel.clear()
         let q = query.trim()
         if (!q) {
-            // Keep launcher clean: show only frequently used apps when query is empty.
-            let frequent = []
+            // Show recently used apps (most recent first) when query is empty.
+            let recent = []
             for (let i = 0; i < allAppsModel.count; i++) {
                 let a = allAppsModel.get(i)
                 let usage = usageScoreFor(a)
-                if (usage > 0) frequent.push({ usage, a })
+                if (usage > 0) recent.push({ usage, a })
             }
-            frequent.sort((x, y) => y.usage - x.usage || x.a.name.localeCompare(y.a.name))
-            for (let i = 0; i < frequent.length; i++) {
-                let a = frequent[i].a
+            recent.sort((x, y) => y.usage - x.usage || x.a.name.localeCompare(y.a.name))
+            for (let i = 0; i < recent.length; i++) {
+                let a = recent[i].a
                 filteredModel.append({ name: a.name, exec: a.exec, icon: a.icon, desktop: a.desktop })
             }
         } else {
@@ -123,7 +123,7 @@ PanelWindow {
         let a = filteredModel.get(idx)
         let k = appUsageKey(a)
         let map = usageCounts
-        map[k] = (parseInt(map[k]) || 0) + 1
+        map[k] = Math.floor(Date.now() / 1000)
         usageCounts = map
         usageWriteProc.appKey = k
         usageWriteProc.running = false
@@ -183,11 +183,12 @@ PanelWindow {
             "USAGE=\"$HOME/.cache/qs_launcher_usage.tsv\"; " +
             "mkdir -p \"$(dirname \"$USAGE\")\"; touch \"$USAGE\"; " +
             "KEY=" + JSON.stringify(appKey) + "; " +
-            "awk -F'|' -v OFS='|' -v key=\"$KEY\" '" +
+            "TS=$(date +%s); " +
+            "awk -F'|' -v OFS='|' -v key=\"$KEY\" -v ts=\"$TS\" '" +
             "BEGIN{found=0} " +
-            "$1==key{$2=($2==\"\"?0:$2)+1;found=1} " +
+            "$1==key{$2=ts;found=1} " +
             "{if($1!=\"\") print $1,$2} " +
-            "END{if(!found) print key,1}' \"$USAGE\" > \"$USAGE.tmp\" && mv \"$USAGE.tmp\" \"$USAGE\""
+            "END{if(!found) print key,ts}' \"$USAGE\" > \"$USAGE.tmp\" && mv \"$USAGE.tmp\" \"$USAGE\""
         ]
     }
 

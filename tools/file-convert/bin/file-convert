@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+# file-convert: local file conversion CLI for Dolphin service menus.
+# All work runs locally. Never overwrites source files.
+set -Eeuo pipefail
+
+PROG="file-convert"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/file-convert"
+mkdir -p -- "$STATE_DIR"
+LOG_FILE="$STATE_DIR/last-run.log"
+: >"$LOG_FILE"
+
+DRY_RUN=0
+
+# ---- logging / notifications ------------------------------------------------
+
+log()  { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG_FILE" >&2; }
+err()  { printf '\e[31m[%s] ERROR:\e[0m %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG_FILE" >&2; }
+note() {
+  local title="$1" body="${2:-}" urgency="${3:-normal}"
+  if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "$PROG" -u "$urgency" -- "$title" "$body" || true
+  fi
+  log "$title${body:+ — $body}"
+}
+
+# Map command -> Arch package for install hints.
+pkg_for_cmd() {
+  case "$1" in
+    magick|convert)                 echo imagemagick ;;
+    libreoffice|soffice)            echo libreoffice-fresh ;;
+    ffmpeg)                         echo ffmpeg ;;
+    gs)                             echo ghostscript ;;
+    qpdf)                           echo qpdf ;;
+    pdftotext|pdftoppm|pdfimages)   echo poppler ;;
+    pandoc)                         echo pandoc ;;
+    ocrmypdf)                       echo ocrmypdf ;;
+    notify-send)                    echo libnotify ;;
+    *)                              echo "$1" ;;
+  esac
+}
+
+need() {
+  local missing_cmds=() missing_pkgs=() cmd
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || {
+      missing_cmds+=("$cmd"); missing_pkgs+=("$(pkg_for_cmd "$cmd")")
+    }
+  done
+  if ((${#missing_cmds[@]})); then
+    note "$PROG: dependency missing" \
+         "Missing: ${missing_cmds[*]}. Install: sudo pacman -S ${missing_pkgs[*]}" critical
+    return 127
+  fi
+}
+
+# For ops that can use either `magick` or `convert` (ImageMagick 7 vs 6).
+need_imagemagick() {
+  command -v magick >/dev/null 2>&1 && return 0
+  command -v convert >/dev/null 2>&1 && return 0
+  note "$PROG: dependency missing" \
+       "Need ImageMagick. Install: sudo pacman -S imagemagick" critical
+  return 127
+}
+
+# ---- path helpers -----------------------------------------------------------
+
+# strip trailing ".ext" only (preserves "file.final.v2")
+strip_ext() { local f="$1"; printf '%s' "${f%.*}"; }
+ext_of()    { local f="$1"; local b="${f##*/}"; case "$b" in *.*) printf '%s' "${b##*.}";; *) printf '';; esac; }
+
+# Collision-safe target path: appends -1, -2, ... before extension
+unique_path() {
+  local target="$1"
+  [[ -e "$target" ]] || { printf '%s' "$target"; return; }
+  local dir base ext stem i=1
+  dir="$(dirname -- "$target")"
+  base="$(basename -- "$target")"
+  case "$base" in
+    *.*) ext="${base##*.}"; stem="${base%.*}";;
+    *)   ext=""; stem="$base";;
+  esac
+  while :; do
+    local cand
+    if [[ -n "$ext" ]]; then cand="$dir/$stem-$i.$ext"; else cand="$dir/$stem-$i"; fi
+    [[ -e "$cand" ]] || { printf '%s' "$cand"; return; }
+    ((i++))
+  done
+}
+
+run() {
+  # Execute command array; respects --dry-run. Uses -- to guard leading-dash args upstream.
+  if ((DRY_RUN)); then
+    printf 'DRY-RUN:'; printf ' %q' "$@"; printf '\n'
+    return 0
+  fi
+  "$@" >>"$LOG_FILE" 2>&1
+}
+
+validate_input() {
+  local f="$1"
+  [[ -e "$f" ]] || { err "not found: $f"; return 2; }
+  [[ -f "$f" ]] || { err "not a regular file: $f"; return 2; }
+  [[ -r "$f" ]] || { err "not readable: $f"; return 2; }
+}
+
+# ---- operations -------------------------------------------------------------
+
+op_office_to_pdf() {
+  need libreoffice || return
+  local src="$1" outdir out target
+  outdir="$(dirname -- "$src")"
+  local stem; stem="$(basename -- "$(strip_ext "$src")")"
+  local tmpdir; tmpdir="$(mktemp -d)"
+  trap '[[ -n "${tmpdir:-}" ]] && rm -rf -- "$tmpdir"' RETURN
+  if ! run libreoffice --headless --convert-to pdf --outdir "$tmpdir" "$src"; then
+    err "LibreOffice conversion failed for $src"; return 1
+  fi
+  local produced="$tmpdir/$stem.pdf"
+  target="$(unique_path "$outdir/$stem.pdf")"
+  if ((DRY_RUN)); then printf '  -> %s\n' "$target"; return 0; fi
+  [[ -f "$produced" ]] || { err "LibreOffice produced no output for $src"; return 1; }
+  mv -- "$produced" "$target"
+  printf '  -> %s\n' "$target"
+}
+
+op_office_convert() {
+  # $1 src, $2 libreoffice target filter/extension (e.g. docx, odt, pptx, odp, xlsx, ods)
+  need libreoffice || return
+  local src="$1" target_ext="$2" outdir stem tmpdir produced target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  tmpdir="$(mktemp -d)"
+  trap '[[ -n "${tmpdir:-}" ]] && rm -rf -- "$tmpdir"' RETURN
+  if ! run libreoffice --headless --convert-to "$target_ext" --outdir "$tmpdir" "$src"; then
+    err "LibreOffice conversion failed for $src -> $target_ext"; return 1
+  fi
+  produced="$tmpdir/$stem.$target_ext"
+  target="$(unique_path "$outdir/$stem.$target_ext")"
+  if ((DRY_RUN)); then printf '  -> %s\n' "$target"; return 0; fi
+  [[ -f "$produced" ]] || { err "no output for $src -> $target_ext"; return 1; }
+  mv -- "$produced" "$target"
+  printf '  -> %s\n' "$target"
+}
+
+op_pdf_to_docx() {
+  # Lossy text-focused extraction: pdftotext -> pandoc.
+  need pdftotext pandoc || return
+  local src="$1" outdir stem txt target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  local tmpdir; tmpdir="$(mktemp -d)"
+  trap '[[ -n "${tmpdir:-}" ]] && rm -rf -- "$tmpdir"' RETURN
+  txt="$tmpdir/$stem.txt"
+  run pdftotext -layout -- "$src" "$txt" || { err "pdftotext failed on $src"; return 1; }
+  target="$(unique_path "$outdir/${stem}-extracted.docx")"
+  run pandoc -f markdown -t docx -o "$target" -- "$txt" || \
+    { err "pandoc failed on $src"; return 1; }
+  note "PDF text extracted (lossy)" "$(basename -- "$target") — layout not preserved"
+  printf '  -> %s (lossy text extraction)\n' "$target"
+}
+
+# ---- images ----
+
+_image_convert() {
+  # $1 src, $2 target ext, $3 optional extra args...
+  need_imagemagick || return
+  local src="$1" target_ext="$2"; shift 2
+  local outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/$stem.$target_ext")"
+  local im; if command -v magick >/dev/null 2>&1; then im=magick; else im=convert; fi
+  run "$im" -- "$src" "$@" "$target" || { err "image conversion failed: $src -> $target_ext"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_image_to_png()  { _image_convert "$1" png -auto-orient; }
+op_image_to_jpg()  { _image_convert "$1" jpg -auto-orient -background white -alpha remove -alpha off -quality 90; }
+op_image_to_webp() { _image_convert "$1" webp -auto-orient -quality 85; }
+op_image_to_avif() { _image_convert "$1" avif -auto-orient -quality 60; }
+op_image_to_pdf()  { _image_convert "$1" pdf -auto-orient; }
+
+op_compress_image() {
+  need_imagemagick || return
+  local src="$1" outdir stem ext target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  ext="$(ext_of "$src")"; [[ -n "$ext" ]] || ext="png"
+  target="$(unique_path "$outdir/${stem}-compressed.$ext")"
+  local im; if command -v magick >/dev/null 2>&1; then im=magick; else im=convert; fi
+  run "$im" -- "$src" -strip -quality 75 "$target" || { err "compress-image failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_resize_image_50() {
+  need_imagemagick || return
+  local src="$1" outdir stem ext target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  ext="$(ext_of "$src")"; [[ -n "$ext" ]] || ext="png"
+  target="$(unique_path "$outdir/${stem}-50pct.$ext")"
+  local im; if command -v magick >/dev/null 2>&1; then im=magick; else im=convert; fi
+  run "$im" -- "$src" -auto-orient -resize 50% "$target" || { err "resize failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+# ---- audio / video ----
+
+_ffmpeg_out() {
+  # $1 src, $2 target ext, then ffmpeg args (input is already inserted as -i "$src")
+  need ffmpeg || return
+  local src="$1" target_ext="$2"; shift 2
+  local outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/$stem.$target_ext")"
+  run ffmpeg -hide_banner -loglevel error -y -i "$src" "$@" "$target" || \
+    { err "ffmpeg failed: $src -> $target_ext"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_audio_to_mp3()  { _ffmpeg_out "$1" mp3  -vn -c:a libmp3lame -q:a 2; }
+op_audio_to_flac() { _ffmpeg_out "$1" flac -vn -c:a flac; }
+op_audio_to_opus() { _ffmpeg_out "$1" opus -vn -c:a libopus -b:a 128k; }
+op_audio_to_wav()  { _ffmpeg_out "$1" wav  -vn -c:a pcm_s16le; }
+op_extract_audio() { _ffmpeg_out "$1" m4a  -vn -c:a copy; }
+
+op_video_to_mp4() {
+  _ffmpeg_out "$1" mp4 -c:v libx264 -preset medium -crf 20 -c:a aac -b:a 160k -movflags +faststart -pix_fmt yuv420p
+}
+op_video_to_webm() {
+  _ffmpeg_out "$1" webm -c:v libvpx-vp9 -crf 32 -b:v 0 -c:a libopus -b:a 128k
+}
+op_video_to_mkv() {
+  _ffmpeg_out "$1" mkv -c:v libx264 -preset medium -crf 20 -c:a aac -b:a 160k
+}
+op_video_to_gif() {
+  _ffmpeg_out "$1" gif -vf "fps=12,scale=480:-1:flags=lanczos"
+}
+op_compress_video() {
+  need ffmpeg || return
+  local src="$1" outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/${stem}-compressed.mp4")"
+  run ffmpeg -hide_banner -loglevel error -y -i "$src" \
+    -c:v libx264 -preset slow -crf 28 -c:a aac -b:a 128k -movflags +faststart -pix_fmt yuv420p \
+    "$target" || { err "compress-video failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+# ---- PDF tools ----
+
+op_compress_pdf() {
+  need gs || return
+  local src="$1" outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/${stem}-compressed.pdf")"
+  run gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook \
+        -dNOPAUSE -dQUIET -dBATCH -sOutputFile="$target" -- "$src" \
+    || { err "compress-pdf failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_ocr_pdf() {
+  need ocrmypdf || return
+  local src="$1" outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/${stem}-ocr.pdf")"
+  run ocrmypdf --skip-text --deskew --rotate-pages -- "$src" "$target" \
+    || { err "ocrmypdf failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_split_pdf_pages() {
+  need qpdf || return
+  local src="$1" outdir stem outdir_pages
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  outdir_pages="$(unique_path "$outdir/${stem}-pages")"
+  ((DRY_RUN)) || mkdir -p -- "$outdir_pages"
+  run qpdf --split-pages=1 -- "$src" "$outdir_pages/page-%d.pdf" \
+    || { err "split failed: $src"; return 1; }
+  printf '  -> %s/\n' "$outdir_pages"
+}
+
+op_extract_pdf_images() {
+  need pdfimages || return
+  local src="$1" outdir stem outdir_img
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  outdir_img="$(unique_path "$outdir/${stem}-images")"
+  ((DRY_RUN)) || mkdir -p -- "$outdir_img"
+  run pdfimages -all -- "$src" "$outdir_img/img" \
+    || { err "pdfimages failed: $src"; return 1; }
+  printf '  -> %s/\n' "$outdir_img"
+}
+
+_rotate_pdf() {
+  need qpdf || return
+  local src="$1" angle="$2" suffix="$3" outdir stem target
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  target="$(unique_path "$outdir/${stem}-${suffix}.pdf")"
+  run qpdf --rotate="+${angle}" -- "$src" "$target" \
+    || { err "rotate failed: $src"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+op_rotate_pdf_right() { _rotate_pdf "$1" 90  rot-right; }
+op_rotate_pdf_left()  { _rotate_pdf "$1" 270 rot-left; }
+
+op_pdf_to_png() {
+  need pdftoppm || return
+  local src="$1" outdir stem outdir_png
+  outdir="$(dirname -- "$src")"
+  stem="$(basename -- "$(strip_ext "$src")")"
+  outdir_png="$(unique_path "$outdir/${stem}-png")"
+  ((DRY_RUN)) || mkdir -p -- "$outdir_png"
+  run pdftoppm -r 200 -png -- "$src" "$outdir_png/page" \
+    || { err "pdftoppm failed: $src"; return 1; }
+  printf '  -> %s/\n' "$outdir_png"
+}
+
+# ---- multi-file operations --------------------------------------------------
+
+op_merge_pdf() {
+  need qpdf || return
+  (($# >= 2)) || { err "merge-pdf needs 2+ PDFs"; return 2; }
+  local first="$1" outdir target ts
+  outdir="$(dirname -- "$first")"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  target="$(unique_path "$outdir/merged-$ts.pdf")"
+  # qpdf --empty --pages a.pdf b.pdf -- out.pdf
+  run qpdf --empty --pages "$@" -- "$target" \
+    || { err "merge failed"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+op_images_to_pdf() {
+  need_imagemagick || return
+  (($# >= 1)) || { err "images-to-pdf needs 1+ image"; return 2; }
+  local first="$1" outdir target ts
+  outdir="$(dirname -- "$first")"
+  ts="$(date +%Y%m%d-%H%M%S)"
+  target="$(unique_path "$outdir/images-$ts.pdf")"
+  local im; if command -v magick >/dev/null 2>&1; then im=magick; else im=convert; fi
+  run "$im" -- "$@" -auto-orient "$target" \
+    || { err "images-to-pdf failed"; return 1; }
+  printf '  -> %s\n' "$target"
+}
+
+# ---- diagnostics ------------------------------------------------------------
+
+do_list() {
+  cat <<'EOF'
+Operations (single-file unless noted):
+
+  Office / documents  [needs: libreoffice; pdf-to-docx also needs pdftotext + pandoc]
+    doc-to-pdf, presentation-to-pdf, spreadsheet-to-pdf, office-to-pdf
+    odt-to-docx, docx-to-odt, odp-to-pptx, pptx-to-odp, ods-to-xlsx, xlsx-to-ods
+    pdf-to-docx                (LOSSY text extraction)
+
+  Images              [needs: imagemagick]
+    image-to-png, image-to-jpg, image-to-webp, image-to-avif, image-to-pdf
+    compress-image, resize-image-50
+
+  Audio / Video       [needs: ffmpeg]
+    audio-to-mp3, audio-to-flac, audio-to-opus, audio-to-wav, extract-audio
+    video-to-mp4, video-to-webm, video-to-mkv, video-to-gif, compress-video
+
+  PDF tools           [needs: qpdf, ghostscript, poppler, ocrmypdf (OCR only)]
+    compress-pdf, ocr-pdf, split-pdf-pages, extract-pdf-images
+    rotate-pdf-right, rotate-pdf-left, pdf-to-png
+
+  Multi-file
+    merge-pdf FILE1 FILE2 ...
+    images-to-pdf FILE1 FILE2 ...
+
+Meta:
+    list, doctor, --dry-run <op> <files...>, --help
+EOF
+}
+
+do_doctor() {
+  local ok=0 bad=0
+  check() {
+    local label="$1" cmd="$2" pkg="$3"
+    if command -v "$cmd" >/dev/null 2>&1; then
+      printf '  [ok]      %-20s (%s)\n' "$label" "$cmd"; ok=$((ok+1))
+    else
+      printf '  [MISSING] %-20s install: sudo pacman -S %s\n' "$label" "$pkg"; bad=$((bad+1))
+    fi
+  }
+  echo "file-convert doctor"
+  echo "-------------------"
+  check "LibreOffice"   libreoffice  libreoffice-fresh
+  check "ImageMagick"   magick       imagemagick
+  check "ffmpeg"        ffmpeg       ffmpeg
+  check "Ghostscript"   gs           ghostscript
+  check "qpdf"          qpdf         qpdf
+  check "pdftotext"     pdftotext    poppler
+  check "pdftoppm"      pdftoppm     poppler
+  check "pdfimages"     pdfimages    poppler
+  check "pandoc"        pandoc       pandoc
+  check "OCRmyPDF"      ocrmypdf     ocrmypdf
+  check "notify-send"   notify-send  libnotify
+  echo
+  local menudir="$HOME/.local/share/kio/servicemenus"
+  local n; n=$(find "$menudir" -maxdepth 1 -name 'file-convert-*.desktop' 2>/dev/null | wc -l)
+  printf '  Service menus in %s: %s file(s)\n' "$menudir" "$n"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) printf '  PATH includes ~/.local/bin: yes\n' ;;
+    *)                      printf '  PATH includes ~/.local/bin: NO — add it to your shell rc\n' ;;
+  esac
+  echo
+  printf 'Summary: %d present, %d missing.\n' "$ok" "$bad"
+}
+
+usage() {
+  cat <<EOF
+Usage: $PROG [--dry-run] <operation> <file...>
+       $PROG list | doctor | --help
+
+Run "$PROG list" to see all operations.
+Logs: $LOG_FILE
+EOF
+}
+
+# ---- dispatch ---------------------------------------------------------------
+
+main() {
+  (($#)) || { usage; exit 2; }
+
+  # options
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --dry-run) DRY_RUN=1; shift;;
+      --help|-h) usage; exit 0;;
+      --) shift; break;;
+      *) err "unknown option: $1"; usage; exit 2;;
+    esac
+  done
+
+  local op="$1"; shift || true
+  [[ "${1:-}" == "--" ]] && shift  # allow: file-convert <op> -- <files>...
+
+  case "$op" in
+    list)   do_list; exit 0;;
+    doctor) do_doctor; exit 0;;
+    -h|--help) usage; exit 0;;
+  esac
+
+  (($#)) || { err "no input files"; usage; exit 2; }
+
+  # multi-file ops handle args themselves; everything else is per-file batch.
+  case "$op" in
+    merge-pdf|images-to-pdf)
+      local i
+      for i in "$@"; do validate_input "$i" || exit 2; done
+      note "$PROG: starting" "$op on $# file(s)"
+      if "op_${op//-/_}" "$@"; then
+        note "$PROG: done" "$op"
+      else
+        note "$PROG: failed" "$op" critical; exit 1
+      fi
+      ;;
+    *)
+      # verify handler exists
+      local handler="op_${op//-/_}"
+      # Aliases for the LibreOffice "convert to X" ops
+      case "$op" in
+        doc-to-pdf|presentation-to-pdf|spreadsheet-to-pdf|office-to-pdf)
+          handler=op_office_to_pdf ;;
+        odt-to-docx)  set -- "$@"; ;;
+        docx-to-odt)  set -- "$@"; ;;
+        odp-to-pptx)  set -- "$@"; ;;
+        pptx-to-odp)  set -- "$@"; ;;
+        ods-to-xlsx)  set -- "$@"; ;;
+        xlsx-to-ods)  set -- "$@"; ;;
+      esac
+      if ! declare -F "$handler" >/dev/null; then
+        # Handle office format ops via generic wrapper
+        case "$op" in
+          odt-to-docx|docx-to-odt|odp-to-pptx|pptx-to-odp|ods-to-xlsx|xlsx-to-ods)
+            local target_ext="${op##*-to-}"
+            note "$PROG: starting" "$op on $# file(s)"
+            local ok=0 fail=0 f
+            for f in "$@"; do
+              validate_input "$f" || { fail=$((fail+1)); continue; }
+              if op_office_convert "$f" "$target_ext"; then ok=$((ok+1)); else fail=$((fail+1)); fi
+            done
+            if ((fail)); then note "$PROG: done with errors" "$ok ok, $fail failed" critical
+            else note "$PROG: done" "$ok converted"; fi
+            (( fail == 0 )) || exit 1
+            exit 0
+            ;;
+          *)
+            err "unknown operation: $op"; usage; exit 2 ;;
+        esac
+      fi
+      note "$PROG: starting" "$op on $# file(s)"
+      local ok=0 fail=0 f
+      for f in "$@"; do
+        validate_input "$f" || { fail=$((fail+1)); continue; }
+        printf '%s: %s\n' "$op" "$f"
+        if "$handler" "$f"; then ok=$((ok+1)); else fail=$((fail+1)); fi
+      done
+      if ((fail)); then
+        note "$PROG: done with errors" "$ok ok, $fail failed. See $LOG_FILE" critical
+        exit 1
+      fi
+      note "$PROG: done" "$ok converted"
+      ;;
+  esac
+}
+
+main "$@"

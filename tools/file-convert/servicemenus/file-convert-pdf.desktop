@@ -1,0 +1,49 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/pdf;
+Actions=PdfCompress;PdfOcr;PdfMerge;PdfSplit;PdfImages;PdfRotR;PdfRotL;PdfToPng;
+Name=Convert – PDF Tools
+X-KDE-Submenu=Convert – PDF Tools
+Icon=application-pdf
+X-KDE-Priority=TopLevel
+
+[Desktop Action PdfCompress]
+Name=Compress PDF
+Icon=archive-extract
+Exec=file-convert compress-pdf %F
+
+[Desktop Action PdfOcr]
+Name=OCR PDF
+Icon=view-pim-journal
+Exec=file-convert ocr-pdf %F
+
+[Desktop Action PdfMerge]
+Name=Merge selected PDFs
+Icon=merge
+Exec=file-convert merge-pdf %F
+
+[Desktop Action PdfSplit]
+Name=Split into individual pages
+Icon=edit-cut
+Exec=file-convert split-pdf-pages %F
+
+[Desktop Action PdfImages]
+Name=Extract embedded images
+Icon=image-x-generic
+Exec=file-convert extract-pdf-images %F
+
+[Desktop Action PdfRotR]
+Name=Rotate right (all pages)
+Icon=object-rotate-right
+Exec=file-convert rotate-pdf-right %F
+
+[Desktop Action PdfRotL]
+Name=Rotate left (all pages)
+Icon=object-rotate-left
+Exec=file-convert rotate-pdf-left %F
+
+[Desktop Action PdfToPng]
+Name=Convert pages to PNG
+Icon=image-x-generic
+Exec=file-convert pdf-to-png %F

@@ -57,7 +57,7 @@ PanelWindow {
     property bool userIsSeeking: false
     property string activeWindowClass: ""
     property string activeWindowTitle: ""
-    // Hyprland fullscreen: 0 none, 1 fullscreen, 2 maximized — hide chrome only for real fullscreen.
+    // Hyprland fullscreen: 0 none, 1 maximized, 2 fullscreen — hide chrome for any fullscreen/maximized state.
     property bool activeWindowFullscreen: false
     property bool bravePriorityActive: false
     property double braveSuppressUntil: 0
@@ -1125,7 +1125,7 @@ PanelWindow {
                 let fsStr = parts[parts.length - 1].trim();
                 let fs = parseInt(fsStr, 10);
                 if (isNaN(fs)) fs = 0;
-                islandWindow.activeWindowFullscreen = (fs === 1);
+                islandWindow.activeWindowFullscreen = (fs >= 1);
                 islandWindow.activeWindowClass = (parts[0] || "").trim();
                 islandWindow.activeWindowTitle = parts.length > 2
                     ? parts.slice(1, parts.length - 1).join("\t").trim()
