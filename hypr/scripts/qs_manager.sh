@@ -107,9 +107,8 @@ handle_wallpaper_prep() {
 }
 
 handle_network_prep() {
-    echo "" > "$BT_SCAN_LOG"
-    { echo "scan on"; sleep infinity; } | stdbuf -oL bluetoothctl > "$BT_SCAN_LOG" 2>&1 &
-    echo $! > "$BT_PID_FILE"
+    # BT scan is owned by NetworkPopup.qml (with auto-restart on bluez perturbations).
+    # We only kick a wifi rescan here.
     (nmcli device wifi rescan) &
 }
 

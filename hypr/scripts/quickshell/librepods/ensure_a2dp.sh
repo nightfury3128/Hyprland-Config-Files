@@ -17,6 +17,13 @@ if [ -z "$MAC" ] || [ "$MAC" = "null" ]; then
     exit 0
 fi
 
+# Opt-in: caller can pass --skip-if-popup as $2 to no-op while the network
+# popup is open (previous unconditional behavior blocked popup-initiated
+# connects from ever landing on A2DP).
+if [ "${2:-}" = "--skip-if-popup" ] && [ "$(cat /tmp/qs_active_widget 2>/dev/null)" = "network" ]; then
+    exit 0
+fi
+
 INFO=$(timeout 1 bluetoothctl info "$MAC" 2>/dev/null || true)
 echo "$INFO" | grep -q 'Connected: yes' || exit 0
 

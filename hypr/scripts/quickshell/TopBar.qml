@@ -164,7 +164,7 @@ Variants {
             property bool isWifiOn: barWindow.wifiStatus.toLowerCase() === "enabled" || barWindow.wifiStatus.toLowerCase() === "on"
             property bool isBtOn: barWindow.btStatus.toLowerCase() === "enabled" || barWindow.btStatus.toLowerCase() === "on"
             property bool showEthernet: barWindow.isDesktop && !barWindow.isWifiOn
-            property bool showPodsPill: barWindow.podsActive
+            property bool showPodsPill: false  // was: barWindow.podsActive — pill kept in plain BT mode by request
             
             property bool isSoundActive: !barWindow.isMuted && parseInt(barWindow.volPercent) > 0
             property int batCap: parseInt(barWindow.batPercent) || 0
