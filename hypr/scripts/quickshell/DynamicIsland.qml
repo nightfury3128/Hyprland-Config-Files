@@ -25,7 +25,7 @@ PanelWindow {
     color: "transparent"
     screen: islandWindow.targetScreen
 
-    Scaler { id: scaler; currentWidth: Screen.width }
+    Scaler { id: scaler; currentWidth: islandWindow.mw }
     function s(v) { return scaler.s(v); }
 
     implicitHeight: s(720)
@@ -77,6 +77,10 @@ PanelWindow {
         }
         return screens.length > 0 ? screens[0] : null;
     }
+
+    // Live dimensions of the monitor the island currently lives on
+    property real mw: targetScreen ? targetScreen.width : Screen.width
+    property real mh: targetScreen ? targetScreen.height : Screen.height
 
     // Page navigation: "clock" | "timer" | "music" | "notifs"
     property string currentPage: "clock"
@@ -823,10 +827,12 @@ PanelWindow {
         onExited: { musicProc.running = true; running = true; }
     }
 
-    // Clock timezone source (derived from dynamic location weather script)
+    // Clock timezone source: always the SYSTEM timezone. geo_timezone.sh
+    // owns keeping the system tz correct; the UI just reads timedatectl so
+    // clock + weather can never disagree with the OS.
     Process {
         id: timezoneProc
-        command: ["bash", "-c", "~/.config/hypr/scripts/geo_timezone.sh --timezone 2>/dev/null || true"]
+        command: ["bash", "-c", "timedatectl show -p Timezone --value 2>/dev/null || echo UTC"]
         stdout: StdioCollector {
             onStreamFinished: {
                 let tz = this.text.trim();
@@ -1259,7 +1265,7 @@ PanelWindow {
 
     Item {
         id: maskBounds
-        x: islandWindow.activeWindowFullscreen ? 0 : (Math.floor((Screen.width - islandShape.width) / 2) - s(14))
+        x: islandWindow.activeWindowFullscreen ? 0 : (Math.floor((islandWindow.mw - islandShape.width) / 2) - s(14))
         y: s(8)
         width: islandWindow.activeWindowFullscreen ? 0 : (islandShape.width + s(28)
                 + (recBubble.shouldShow ? recBubble.width + s(8) : 0)
@@ -1304,7 +1310,7 @@ PanelWindow {
             return baseW;
         }
         property int collapsedH: (islandWindow.currentPage === "app" && islandWindow.isBraveWindow) ? s(58) : s(48)
-        property int expandedW:  Math.min(s(760), Screen.width - s(32))
+        property int expandedW:  Math.min(s(760), islandWindow.mw - s(32))
         property int expandedH: {
             if (islandWindow.notifActive) return s(88);
             if (islandWindow.currentPage === "stash") return s(islandWindow.stashExpandedHeight);
@@ -1314,7 +1320,7 @@ PanelWindow {
 
         width:  islandWindow.expanded ? expandedW  : collapsedW
         height: islandWindow.expanded ? expandedH  : collapsedH
-        x: Math.floor((Screen.width - width) / 2)
+        x: Math.floor((islandWindow.mw - width) / 2)
         y: s(8)
 
         opacity: (islandWindow.launcherActive || islandWindow.activeWindowFullscreen) ? 0.0 : 1.0
@@ -1843,7 +1849,7 @@ PanelWindow {
         z: 10
         height: s(32)
         width: islandWindow.chronoEdgeCompact ? s(32) : (chipRow.implicitWidth + s(20))
-        x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
+        x: Math.floor(islandWindow.mw / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
            - ((islandWindow.vpnBadgeVisible || discordBubble.shouldShow) ? (s(42)) : 0)
         y: s(8) + (islandShape.collapsedH - height) / 2
 
@@ -1898,7 +1904,7 @@ PanelWindow {
         z: 10
         height: s(32)
         width: islandWindow.chronoEdgeCompact ? s(32) : (chipRowR.implicitWidth + s(20))
-        x: Math.floor(Screen.width / 2) + islandShape.collapsedW / 2 + s(10) + islandWindow.volRightExtra
+        x: Math.floor(islandWindow.mw / 2) + islandShape.collapsedW / 2 + s(10) + islandWindow.volRightExtra
            + (recBubble.shouldShow ? (recBubble.width + s(8)) : 0)
            + (islandWindow.notifBadgeVisible ? s(44) : 0)
         y: s(8) + (islandShape.collapsedH - height) / 2
@@ -1959,7 +1965,7 @@ PanelWindow {
         z: 10
 
         property int sz: s(36)
-        x: Math.floor(Screen.width / 2) + islandShape.collapsedW / 2 + s(12)
+        x: Math.floor(islandWindow.mw / 2) + islandShape.collapsedW / 2 + s(12)
            + (recBubble.shouldShow ? recBubble.width + s(8) : 0)
            + islandWindow.volRightExtra
         y: s(8) + (islandShape.collapsedH - sz) / 2
@@ -2022,7 +2028,7 @@ PanelWindow {
         // Pill width = row content + padding
         width: vpnBadgeRow.implicitWidth + s(28)
 
-        x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(12) - islandWindow.volLeftExtra
+        x: Math.floor(islandWindow.mw / 2) - islandShape.collapsedW / 2 - width - s(12) - islandWindow.volLeftExtra
         y: s(8) + (islandShape.collapsedH - badgeH) / 2
 
         opacity: islandWindow.vpnBadgeVisible && !islandWindow.expanded && !islandWindow.activeWindowFullscreen ? 1.0 : 0.0
@@ -2090,7 +2096,7 @@ PanelWindow {
             && !islandWindow.expanded
             && !islandWindow.activeWindowFullscreen
 
-        x: Math.floor(Screen.width / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
+        x: Math.floor(islandWindow.mw / 2) - islandShape.collapsedW / 2 - width - s(10) - islandWindow.volLeftExtra
         y: s(8) + (islandShape.collapsedH - bubbleH) / 2
 
         opacity: shouldShow ? 1.0 : 0.0
@@ -2161,7 +2167,7 @@ PanelWindow {
             && !islandWindow.expanded
             && !islandWindow.activeWindowFullscreen
 
-        x: Math.floor(Screen.width / 2) + islandShape.collapsedW / 2 + s(12) + islandWindow.volRightExtra
+        x: Math.floor(islandWindow.mw / 2) + islandShape.collapsedW / 2 + s(12) + islandWindow.volRightExtra
         y: s(8) + (islandShape.collapsedH - bubbleH) / 2
 
         opacity: shouldShow ? 1.0 : 0.0

@@ -78,7 +78,13 @@ Item {
         Quickshell.execDetached(["bash", "-c", "mkdir -p '" + window.cacheDir + "'; if [ ! -f '" + window.modeFilePath + "' ]; then echo '" + activeMode + "' > '" + window.modeFilePath + "'; fi"]);
 
         if (cache.lastWifiJson !== "") processWifiJson(cache.lastWifiJson);
-        if (cache.lastBtJson !== "") processBtJson(cache.lastBtJson);
+        // Deliberately do NOT hydrate bluetooth from cache — it goes stale
+        // fast (devices sleep/roam/power-cycle between opens) and showing a
+        // phantom "connected" AirPods before the first live poll returns is
+        // what made the popup look inconsistent per-monitor. Force a fresh
+        // poll instead.
+        btPoller.running = false;
+        btPoller.running = true;
         window.lastDownloadMbps = cache.lastSpeedDownload;
         window.lastUploadMbps = cache.lastSpeedUpload;
         window.lastPingMs = cache.lastSpeedPing;
@@ -105,6 +111,7 @@ Item {
         pendingWifiId = "";
         pendingWifiSsid = "";
         pendingWifiAllowEmpty = false;
+        pendingWifiEnterprise = false;
     }
 
     function refreshSavedNetworks() {
@@ -171,6 +178,7 @@ Item {
     property string pendingWifiSsid: ""
     property string pendingWifiId: ""
     property bool pendingWifiAllowEmpty: false
+    property bool pendingWifiEnterprise: false
     property var savedWifiNetworks: []
 
     Process {
@@ -317,7 +325,7 @@ Item {
         }
     }
 
-    function connectDevice(mode, id, macOrSsid, password) {
+    function connectDevice(mode, id, macOrSsid, password, identity) {
         window.connectingId = id;
         window.failedId = "";
         let bt = window.busyTasks;
@@ -326,10 +334,29 @@ Item {
         busyTimeout.restart();
 
         connectProcess.targetId = id;
-        connectProcess.targetSsid = (mode === "wifi") ? macOrSsid : ""; 
-        
+        connectProcess.targetSsid = (mode === "wifi") ? macOrSsid : "";
+
         if (mode === "wifi") {
-            if (password !== "") {
+            let user = identity || "";
+            if (user !== "") {
+                // Enterprise (802.1X / PEAP+MSCHAPv2). Recreate the profile fresh so
+                // credential changes always take, then activate it.
+                let ssidJson = JSON.stringify(macOrSsid);
+                let userJson = JSON.stringify(user);
+                let passJson = JSON.stringify(password);
+                connectProcess.command = ["bash", "-c",
+                    "SSID=" + ssidJson + "; USER=" + userJson + "; PASS=" + passJson + "; " +
+                    "IFACE=$(nmcli -t -f DEVICE,TYPE d | awk -F: '$2==\"wifi\"{print $1;exit}'); " +
+                    "nmcli connection delete \"$SSID\" 2>/dev/null; " +
+                    "nmcli connection add type wifi ifname \"$IFACE\" con-name \"$SSID\" ssid \"$SSID\" " +
+                    "  wifi-sec.key-mgmt wpa-eap " +
+                    "  802-1x.eap peap " +
+                    "  802-1x.phase2-auth mschapv2 " +
+                    "  802-1x.identity \"$USER\" " +
+                    "  802-1x.password \"$PASS\" && " +
+                    "nmcli connection up \"$SSID\""
+                ];
+            } else if (password !== "") {
                 connectProcess.command = ["bash", "-c", "nmcli device wifi connect '" + macOrSsid + "' password '" + password + "'"];
             } else {
                 // Prefer activating an existing profile (saved secrets), then fall back to scan-connect.
@@ -431,6 +458,21 @@ Item {
         window.currentCores = [null, null, null, null, null];
         window.coreVisualIndices = [0, 0, 0, 0, 0];
         window.activeCoreCount = 0;
+
+        // Force a fresh poll of the mode we're switching into so we don't
+        // render leftover state from the previous open. Clear the target
+        // mode's device list first so the UI doesn't flash stale entries.
+        if (window.activeMode === "bt") {
+            window.btConnected = [];
+            window.btList = [];
+            btListModel.clear();
+            btPoller.running = false;
+            btPoller.running = true;
+        } else {
+            wifiPoller.running = false;
+            wifiPoller.running = true;
+        }
+
         syncCores();
         window.showInfoView = window.currentConn;
         if (window.showInfoView) window.updateInfoNodes();
@@ -598,6 +640,21 @@ Item {
                     });
                 } else {
                     nodes.push({ id: "bat_" + obj.mac, name: (obj.battery || "0") + "%", icon: "󰥉", action: "Battery", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    // AirPods-specific extras (present iff librepods matched this MAC)
+                    if (obj.leftAvailable) {
+                        nodes.push({ id: "batL_" + obj.mac, name: (obj.left || 0) + "%", icon: "󰧑", action: "Left Bud", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    }
+                    if (obj.rightAvailable) {
+                        nodes.push({ id: "batR_" + obj.mac, name: (obj.right || 0) + "%", icon: "󰧑", action: "Right Bud", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    }
+                    if (obj.caseAvailable) {
+                        nodes.push({ id: "batC_" + obj.mac, name: (obj.case || 0) + "%", icon: "󰂎", action: "Case", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    }
+                    if (obj.noise && obj.noise !== "off") {
+                        let noiseIcon = obj.noise === "anc" ? "󰋋" : (obj.noise === "transparency" ? "󰓃" : (obj.noise === "adaptive" ? "󰥰" : "󰟎"));
+                        let noiseLabel = obj.noise === "anc" ? "Noise Cancellation" : (obj.noise === "transparency" ? "Transparency" : (obj.noise === "adaptive" ? "Adaptive" : obj.noise));
+                        nodes.push({ id: "noise_" + obj.mac, name: noiseLabel, icon: noiseIcon, action: "Noise Mode", isInfoNode: true, isActionable: false, parentIndex: cIndex });
+                    }
                     if (obj.profile) {
                         nodes.push({ id: "prof_" + obj.mac, name: obj.profile, icon: (obj.profile === "Hi-Fi (A2DP)" ? "󰓃" : "󰋎"), action: "Audio Profile", isInfoNode: true, isActionable: false, parentIndex: cIndex });
                     }
@@ -812,6 +869,28 @@ Item {
                 cache.lastBtJson = this.text.trim();
                 processBtJson(cache.lastBtJson);
             }
+        }
+    }
+
+    // Popup-owned bluetooth scan. Runs while BT mode is active; the reconciler
+    // timer restarts it if bluez perturbations (A2DP profile switches from
+    // librepods, disconnect events, etc.) kill the bluetoothctl process.
+    Process {
+        id: btScanOwner
+        running: false
+        command: ["bash", "-c",
+            "trap 'timeout 1 bluetoothctl scan off >/dev/null 2>&1' EXIT INT TERM; " +
+            "{ echo 'scan on'; sleep infinity; } | stdbuf -oL bluetoothctl >/dev/null 2>&1"]
+    }
+    Timer {
+        interval: 2000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: {
+            let shouldRun = window.activeMode === "bt";
+            if (shouldRun && !btScanOwner.running) btScanOwner.running = true;
+            else if (!shouldRun && btScanOwner.running) btScanOwner.running = false;
         }
     }
     
@@ -1369,10 +1448,46 @@ Item {
                                         Layout.preferredWidth: pwdLayer.width - window.s(40); height: window.s(36)
                                         radius: window.s(18)
                                         color: window.surface0
+                                        border.color: wifiUsernameField.activeFocus ? window.crust : "transparent"
+                                        border.width: 1
+                                        visible: window.pendingWifiEnterprise
+                                        Behavior on border.color { ColorAnimation { duration: 200 } }
+
+                                        TextInput {
+                                            id: wifiUsernameField
+                                            anchors.fill: parent
+                                            anchors.leftMargin: window.s(15); anchors.rightMargin: window.s(15)
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            font.family: "JetBrains Mono"; font.pixelSize: window.s(13); color: window.text
+                                            clip: true
+                                            KeyNavigation.tab: wifiPasswordField
+                                            onAccepted: wifiPasswordField.forceActiveFocus()
+                                            Keys.onEscapePressed: {
+                                                window.clearPendingWifiInput();
+                                                text = "";
+                                                wifiPasswordField.text = "";
+                                                window.forceActiveFocus();
+                                            }
+
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: "Username"
+                                                color: window.overlay0
+                                                font: parent.font
+                                                visible: parent.text.length === 0 && !parent.activeFocus
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        Layout.preferredWidth: pwdLayer.width - window.s(40); height: window.s(36)
+                                        radius: window.s(18)
+                                        color: window.surface0
                                         border.color: wifiPasswordField.activeFocus ? window.crust : "transparent"
                                         border.width: 1
                                         Behavior on border.color { ColorAnimation { duration: 200 } }
-                                        
+
                                         TextInput {
                                             id: wifiPasswordField
                                             anchors.fill: parent
@@ -1382,20 +1497,20 @@ Item {
                                             echoMode: TextInput.Password; clip: true
                                             onAccepted: {
                                                 let pwd = text.trim();
-                                                if (pwd !== "" || window.pendingWifiAllowEmpty) {
-                                                    window.connectDevice("wifi", window.pendingWifiId, window.pendingWifiSsid, pwd);
-                                                    window.pendingWifiId = "";
-                                                    window.pendingWifiSsid = "";
-                                                    window.pendingWifiAllowEmpty = false;
+                                                let user = window.pendingWifiEnterprise ? wifiUsernameField.text.trim() : "";
+                                                let userOk = !window.pendingWifiEnterprise || user !== "";
+                                                if (userOk && (pwd !== "" || window.pendingWifiAllowEmpty)) {
+                                                    window.connectDevice("wifi", window.pendingWifiId, window.pendingWifiSsid, pwd, user);
+                                                    window.clearPendingWifiInput();
                                                     text = "";
+                                                    wifiUsernameField.text = "";
                                                     window.forceActiveFocus();
                                                 }
                                             }
                                             Keys.onEscapePressed: {
-                                                window.pendingWifiId = "";
-                                                window.pendingWifiSsid = "";
-                                                window.pendingWifiAllowEmpty = false;
+                                                window.clearPendingWifiInput();
                                                 text = "";
+                                                wifiUsernameField.text = "";
                                                 window.forceActiveFocus();
                                             }
                                         }
@@ -1405,13 +1520,17 @@ Item {
                                 Timer {
                                     id: deferFocusTimer
                                     interval: 50
-                                    onTriggered: wifiPasswordField.forceActiveFocus()
+                                    onTriggered: {
+                                        if (window.pendingWifiEnterprise) wifiUsernameField.forceActiveFocus();
+                                        else wifiPasswordField.forceActiveFocus();
+                                    }
                                 }
-                                onVisibleChanged: { 
-                                    if (visible) { 
-                                        wifiPasswordField.text = ""; 
-                                        deferFocusTimer.start(); 
-                                    } 
+                                onVisibleChanged: {
+                                    if (visible) {
+                                        wifiUsernameField.text = "";
+                                        wifiPasswordField.text = "";
+                                        deferFocusTimer.start();
+                                    }
                                 }
                             }
 
@@ -2120,8 +2239,9 @@ Item {
                                                 window.pendingWifiSsid = targetSsid;
                                                 window.pendingWifiId = floatCard.itemId;
                                                 window.pendingWifiAllowEmpty = false;
+                                                window.pendingWifiEnterprise = sec.indexOf("802.1x") >= 0;
                                             } else {
-                                                window.connectDevice(window.activeMode, floatCard.itemId, window.activeMode === "wifi" ? targetSsid : mac, "");
+                                                window.connectDevice(window.activeMode, floatCard.itemId, window.activeMode === "wifi" ? targetSsid : mac, "", "");
                                             }
                                         }
                                     }

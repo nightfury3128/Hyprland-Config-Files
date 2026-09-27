@@ -18,8 +18,8 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     focusable: true
 
-    width: Screen.width
-    height: Screen.height
+    width: mw
+    height: mh
 
     visible: isVisible
 
@@ -35,6 +35,14 @@ PanelWindow {
     }
     screen: masterWindow.targetScreen
 
+    // Live dimensions of the monitor the popup currently lives on
+    property real mw: targetScreen ? targetScreen.width : Screen.width
+    property real mh: targetScreen ? targetScreen.height : Screen.height
+
+    onTargetScreenChanged: handleNativeScreenChange()
+    onMwChanged: handleNativeScreenChange()
+    onMhChanged: handleNativeScreenChange()
+
     mask: Region { item: topBarHole; intersection: Intersection.Xor }
 
     Item {
@@ -42,7 +50,7 @@ PanelWindow {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Registry.s(70, Registry.getScale(Screen.width, masterWindow.globalUiScale))
+        height: Registry.s(70, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale))
     }
 
     MouseArea {
@@ -193,13 +201,7 @@ PanelWindow {
     Timer { interval: 150; running: true; triggeredOnStart: true; onTriggered: focusedMonProc.running = true }
 
     function getLayout(name) {
-        return Registry.getLayout(name, 0, 0, Screen.width, Screen.height, masterWindow.globalUiScale);
-    }
-
-    Connections {
-        target: Screen
-        function onWidthChanged() { handleNativeScreenChange(); }
-        function onHeightChanged() { handleNativeScreenChange(); }
+        return Registry.getLayout(name, 0, 0, masterWindow.mw, masterWindow.mh, masterWindow.globalUiScale);
     }
 
     function handleNativeScreenChange() {
@@ -305,11 +307,11 @@ PanelWindow {
                 // while island-style widgets keep the center-origin animation.
                 let initialLayout = getLayout(newWidget);
                 if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume" || newWidget === "librepods")) {
-                    masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(Screen.width, masterWindow.globalUiScale));
-                    masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(Screen.width, masterWindow.globalUiScale));
+                    masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
+                    masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
                 } else {
                     // Polymorphic start point: top center where the island is
-                    masterWindow.animX = Math.floor(Screen.width / 2);
+                    masterWindow.animX = Math.floor(masterWindow.mw / 2);
                     masterWindow.animY = 35;
                 }
                 masterWindow.animW = 1;

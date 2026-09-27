@@ -11,6 +11,10 @@ daily_cache_file="${cache_dir}/daily_weather_cache.json"
 next_day_cache_file="${cache_dir}/next_day_precache.json"
 env_tracker_file="${cache_dir}/.env_tracker"
 location_cache_file="${cache_dir}/location.json"
+# Shared cache written by geo_timezone.sh — the single source of truth for
+# the laptop's current geographic location. weather.sh reads from it and
+# never writes to it, so weather + clock cannot disagree about location.
+shared_geo_cache="$HOME/.cache/quickshell/geo/location.json"
 ENV_FILE="$(dirname "$0")/.env"
 
 # API Settings
@@ -64,31 +68,41 @@ resolve_location() {
         fi
     fi
 
-    if [ "$fetch_needed" -eq 1 ] && command -v curl >/dev/null 2>&1; then
-        # Lightweight IP geolocation fallback for roaming laptops.
-        # Try multiple providers for reliability across networks.
+    # Prefer the shared geo cache maintained by geo_timezone.sh so that
+    # weather and clock never disagree about the current location.
+    local src=""
+    if [ -f "$shared_geo_cache" ]; then
+        src="$shared_geo_cache"
+    elif [ -f "$location_cache_file" ]; then
+        src="$location_cache_file"
+    fi
+
+    # Only fall back to our own IP fetch if the shared cache is missing.
+    # geo_timezone.sh is expected to own this responsibility.
+    if [ -z "$src" ] && [ "$fetch_needed" -eq 1 ] && command -v curl >/dev/null 2>&1; then
         rm -f "$location_cache_file.tmp"
         curl -sf --max-time 4 "https://ipapi.co/json/" > "$location_cache_file.tmp" 2>/dev/null || true
         if [ ! -s "$location_cache_file.tmp" ]; then
             curl -sf --max-time 4 "https://ipwho.is/" > "$location_cache_file.tmp" 2>/dev/null || true
         fi
-        if [ ! -s "$location_cache_file.tmp" ]; then
-            curl -sf --max-time 4 "http://ip-api.com/json/" > "$location_cache_file.tmp" 2>/dev/null || true
-        fi
-        if [ -s "$location_cache_file.tmp" ]; then
+        if [ -s "$location_cache_file.tmp" ] && command -v jq >/dev/null 2>&1 \
+                && jq -e . "$location_cache_file.tmp" >/dev/null 2>&1; then
             mv "$location_cache_file.tmp" "$location_cache_file"
+            src="$location_cache_file"
         else
             rm -f "$location_cache_file.tmp"
         fi
     fi
 
-    if [ -f "$location_cache_file" ] && command -v jq >/dev/null 2>&1; then
-        resolved_lat=$(jq -r '.latitude // .lat // empty' "$location_cache_file" 2>/dev/null)
-        resolved_lon=$(jq -r '.longitude // .lon // empty' "$location_cache_file" 2>/dev/null)
-        # ipapi.co uses a string timezone; ipwho.is nests timezone as { "id": "Asia/Kolkata", ... }
-        resolved_tz=$(jq -r 'if (.timezone | type) == "string" then .timezone elif (.timezone | type) == "object" then (.timezone.id // empty) else empty end' "$location_cache_file" 2>/dev/null)
-        resolved_city=$(jq -r '.city // empty' "$location_cache_file" 2>/dev/null)
+    if [ -n "$src" ] && command -v jq >/dev/null 2>&1; then
+        resolved_lat=$(jq -r '.latitude // .lat // empty' "$src" 2>/dev/null)
+        resolved_lon=$(jq -r '.longitude // .lon // empty' "$src" 2>/dev/null)
+        resolved_city=$(jq -r '.city // empty' "$src" 2>/dev/null)
     fi
+
+    # The system timezone is the single source of truth — never trust the
+    # geolocation blob's timezone for UI formatting.
+    resolved_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "UTC")
 }
 
 get_icon() {
@@ -400,26 +414,22 @@ elif [[ "$1" == "--hex" ]]; then
 
 # --- NEW HOURLY MODES FOR TOPBAR ---
 elif [[ "$1" == "--timezone" ]]; then
-    resolve_location
-    if [ -n "$resolved_tz" ]; then
-        echo "$resolved_tz"
-    else
-        timedatectl show -p Timezone --value 2>/dev/null || echo "UTC"
-    fi
+    # System timezone is the single source of truth.
+    timedatectl show -p Timezone --value 2>/dev/null || echo "UTC"
 
 elif [[ "$1" == "--current-icon" ]]; then
-    resolve_location
-    curr_time=$(TZ="${resolved_tz:-$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)}" date +%H:%M)
+    sys_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)
+    curr_time=$(TZ="$sys_tz" date +%H:%M)
     cat "$json_file" | jq -r --arg ct "$curr_time" '(.forecast[0].hourly | map(select(.time <= $ct)) | last) // .forecast[0].hourly[0] | .icon'
 
-elif [[ "$1" == "--current-temp" ]]; then 
-    resolve_location
-    curr_time=$(TZ="${resolved_tz:-$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)}" date +%H:%M)
+elif [[ "$1" == "--current-temp" ]]; then
+    sys_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)
+    curr_time=$(TZ="$sys_tz" date +%H:%M)
     t=$(cat "$json_file" | jq -r --arg ct "$curr_time" '(.forecast[0].hourly | map(select(.time <= $ct)) | last) // .forecast[0].hourly[0] | .temp')
     echo "${t}°C"
 
 elif [[ "$1" == "--current-hex" ]]; then
-    resolve_location
-    curr_time=$(TZ="${resolved_tz:-$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)}" date +%H:%M)
+    sys_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)
+    curr_time=$(TZ="$sys_tz" date +%H:%M)
     cat "$json_file" | jq -r --arg ct "$curr_time" '(.forecast[0].hourly | map(select(.time <= $ct)) | last) // .forecast[0].hourly[0] | .hex'
 fi

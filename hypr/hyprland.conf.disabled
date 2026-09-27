@@ -1,6 +1,7 @@
 
 # Battery/internal-panel test: expose only the Intel GPU to Hyprland
-env = AQ_DRM_DEVICES,/dev/dri/by-path/pci-0000:00:02.0-card:/dev/dri/by-path/pci-0000:01:00.0-card
+env = AQ_DRM_DEVICES,/dev/dri/card2
+
 
 monitor = eDP-1,preferred,auto,1
 monitor = DP-3,preferred,auto,1
@@ -162,7 +163,7 @@ bind = $mainMod, V,     togglefloating,
 bind = $mainMod, P,     pseudo,
 bind = $mainMod, J,     layoutmsg,    togglesplit
 bind = $mainMod, L,     exec,         ~/.config/hypr/scripts/lock.sh
-bind = $mainMod SHIFT,  W, exec,      pkill -f "quickshell" ; 
+bind = $mainMod SHIFT,  W, exec,      pkill -f "quickshell" ; sleep 0.3 && ~/.config/hypr/scripts/qs_manager.sh
 bind = $mainMod, W, exec, kitty --class wallpaper-picker ~/.config/hypr/wallpaper.sh
 bind = SUPER, G, exec, ~/.config/quickshell/game-launcher/toggle.sh
 bind = $mainMod SHIFT, X, killactive

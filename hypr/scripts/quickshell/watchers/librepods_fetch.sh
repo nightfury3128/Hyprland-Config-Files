@@ -40,7 +40,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENSURE_A2DP="$SCRIPT_DIR/../librepods/ensure_a2dp.sh"
 if [ -x "$ENSURE_A2DP" ] && echo "$raw" | jq -e '.connected == true' >/dev/null 2>&1; then
     MAC=$(echo "$raw" | jq -r '.address // empty')
-    timeout 2 "$ENSURE_A2DP" "$MAC" >/dev/null 2>&1 || true
+    timeout 2 "$ENSURE_A2DP" "$MAC" --skip-if-popup >/dev/null 2>&1 || true
 fi
 
 echo "$raw" | jq -c '
