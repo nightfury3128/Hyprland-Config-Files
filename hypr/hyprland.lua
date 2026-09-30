@@ -52,7 +52,6 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd("/home/nipun/librepods/linux/build/librepods --hide")
     hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh")
-    hl.exec_cmd("steam")
 end)
 
 
@@ -95,7 +94,7 @@ hl.config({
         blur = {
             enabled = true,
             size    = 6,
-            passes  = 2,
+            passes  = 1,
             xray    = false,
         },
     },
@@ -190,8 +189,15 @@ hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.confi
 
 -- Launcher
 hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(menu))
-hl.bind("SUPER + D",           hl.dsp.exec_cmd(menu))
 hl.bind("SUPER + SPACE",       hl.dsp.exec_cmd(menu))
+
+-- App launchers
+hl.bind("SUPER + Z", hl.dsp.exec_cmd("sh -c 'command -v zen-browser >/dev/null 2>&1 && exec zen-browser || command -v zen >/dev/null 2>&1 && exec zen || xdg-open https://www.google.com'"))
+hl.bind("SUPER + S", hl.dsp.exec_cmd("spotify"))
+hl.bind("SUPER + C", hl.dsp.exec_cmd("cursor"))
+hl.bind("SUPER + D", hl.dsp.exec_cmd("discord"))
+hl.bind("SUPER + A", hl.dsp.exec_cmd("xdg-open https://uc.instructure.com/"))
+hl.bind("SUPER + O", hl.dsp.exec_cmd("xdg-open https://outlook.com/"))
 
 -- Workspace TAB gecis
 hl.bind(mainMod .. " + TAB",           hl.dsp.focus({ workspace = "e+1" }))
@@ -222,9 +228,6 @@ for i = 1, 10 do
     hl.bind(mainMod .. " + " .. key,           hl.dsp.focus({ workspace = i }))
     hl.bind(mainMod .. " + SHIFT + " .. key,   hl.dsp.window.move({ workspace = i }))
 end
-
--- Scratchpad
-hl.bind(mainMod .. " + S", hl.dsp.workspace.toggle_special("magic"))
 
 -- Mouse
 hl.bind(mainMod .. " + mouse_down", hl.dsp.focus({ workspace = "e+1" }))

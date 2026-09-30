@@ -39,7 +39,7 @@ apply_hyprctl_ac() {
         keyword animations:enabled 1 ;\
         keyword decoration:blur:enabled true ;\
         keyword decoration:blur:size 6 ;\
-        keyword decoration:blur:passes 2 ;\
+        keyword decoration:blur:passes 1 ;\
         keyword decoration:shadow:enabled true ;\
         keyword decoration:active_opacity 0.92 ;\
         keyword decoration:inactive_opacity 0.82 ;\
@@ -90,23 +90,31 @@ refresh() {
 
 refresh
 
-# udevadm monitor can silently die; wrap in a restart loop.
-while :; do
-    udevadm monitor --subsystem-match=power_supply 2>/dev/null \
-        | while IFS= read -r line; do
-            case "$line" in
-                *"change"*)
-                    sleep 0.5
-                    refresh
-                    ;;
-            esac
-        done
-    refresh
-    sleep 5
-done &
+# Event-driven: block on udev power_supply changes; debounce bursts.
+# If udevadm dies, back off and retry — a low-frequency wall-clock
+# refresh below still catches missed transitions.
+udev_loop() {
+    while :; do
+        udevadm monitor --subsystem-match=power_supply 2>/dev/null \
+            | while IFS= read -r line; do
+                case "$line" in
+                    *change*)
+                        sleep 0.5
+                        refresh
+                        ;;
+                esac
+            done
+        sleep 30
+    done
+}
 
-# Periodic safety net in case udev events are missed entirely.
+udev_loop &
+UDEV_PID=$!
+trap 'kill "$UDEV_PID" 2>/dev/null' EXIT INT TERM
+
+# Wall-clock safety net for missed events (15 min is fine — udev
+# handles real transitions in under a second).
 while :; do
-    sleep 120
+    sleep 900
     refresh
 done

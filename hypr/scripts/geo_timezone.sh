@@ -304,11 +304,18 @@ daemon_main() {
     local periodic_pid=$!
 
     # NetworkManager change → force a re-check (debounced by FETCH_MIN_INTERVAL).
+    # Filter to real connectivity transitions so Wi-Fi scans / signal blips
+    # don't wake this process on every event.
     if command -v nmcli >/dev/null 2>&1; then
         (
-            nmcli monitor 2>/dev/null | while IFS= read -r _line; do
-                sleep 3
-                run_sync 1 || true
+            nmcli monitor 2>/dev/null | while IFS= read -r line; do
+                case "$line" in
+                    *"Connectivity is now 'full'"*|\
+                    *"NetworkManager is now in the 'connected' state"*)
+                        sleep 5
+                        run_sync 1 || true
+                        ;;
+                esac
             done
         ) &
         local nm_pid=$!
