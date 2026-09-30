@@ -12,11 +12,14 @@ read_bat() {
     echo "${percent:-?}|${status:-?}"
 }
 
-# Exit as soon as capacity or charging status changes
+# Exit as soon as capacity or charging status changes.
+# Capacity moves at most ~1%/minute in normal use, so a 10-second poll is
+# plenty of resolution — instant transitions (AC plug/unplug) still wake via
+# the udev listener below.
 (
     prev=$(read_bat)
     while true; do
-        sleep 2
+        sleep 10
         cur=$(read_bat)
         if [ "$cur" != "$prev" ]; then
             echo "changed" > "$PIPE"
