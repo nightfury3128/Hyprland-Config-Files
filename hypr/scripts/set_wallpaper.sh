@@ -26,12 +26,13 @@ if [ -z "$img" ] || [ ! -f "$img" ]; then
     exit 1
 fi
 
-if ! pgrep -x awww-daemon >/dev/null 2>&1; then
-    awww-daemon >/dev/null 2>&1 &
-    sleep 0.3
+APPLY_ALL="$HOME/.config/hypr/scripts/wallpaper_apply.sh"
+if [ ! -x "$APPLY_ALL" ]; then
+    notify-send "Wallpaper" "Missing wallpaper_apply.sh helper."
+    exit 1
 fi
 
-awww img "$img" --transition-type any --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1
+bash "$APPLY_ALL" "$img" any
 cp "$img" /tmp/lock_bg.png 2>/dev/null || true
 mkdir -p "$(dirname "$LAST")"
 printf '%s\n' "$img" > "$LAST"

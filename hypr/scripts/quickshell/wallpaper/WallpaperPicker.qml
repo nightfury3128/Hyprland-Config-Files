@@ -136,9 +136,7 @@ Item {
                         
                         # DETERMINISTIC LOOP
                         for i in {1..20}; do
-                            if ${renderOverride}awww img "$DEST_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                                break
-                            fi
+                            bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$DEST_FILE" ${randomTransition} >/dev/null 2>&1 && break
                             sleep 0.05
                         done
                         
@@ -185,9 +183,7 @@ Item {
                             
                             # DETERMINISTIC LOOP
                             for i in {1..20}; do
-                                if ${renderOverride}awww img "$DEST_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                                    break
-                                fi
+                                bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$DEST_FILE" ${randomTransition} >/dev/null 2>&1 && break
                                 sleep 0.05
                             done
                             
@@ -217,9 +213,7 @@ Item {
             wallpaperCmd = `
                 ${ensureDaemonCmd}
                 for i in {1..20}; do
-                    if ${renderOverride}awww img "$WALL_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                        break
-                    fi
+                    bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$WALL_FILE" ${randomTransition} >/dev/null 2>&1 && break
                     sleep 0.05
                 done
             `

@@ -18,6 +18,14 @@ Variants {
 
             // Bind this specific bar instance to the dynamically assigned screen
             screen: modelData
+
+            // Only the first bar runs the shared workspace daemon.
+            property bool isPrimaryBar: {
+                let screens = Quickshell.screens;
+                if (!screens || screens.length === 0 || !barWindow.screen)
+                    return true;
+                return barWindow.screen.name === screens[0].name;
+            }
             
             anchors {
                 top: true
@@ -184,7 +192,7 @@ Variants {
             Process {
                 id: wsDaemon
                 command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/workspaces.sh"]
-                running: true
+                running: barWindow.isPrimaryBar
             }
 
             Process {
@@ -195,6 +203,8 @@ Variants {
                         let txt = this.text.trim();
                         if (txt !== "") {
                             try { 
+                                // Same workspace list on every bar; labels are real Hyprland IDs
+                                // (not array positions), so pills never show 1,2,1.
                                 let newData = JSON.parse(txt);
                                 if (workspacesModel.count !== newData.length) {
                                     workspacesModel.clear();

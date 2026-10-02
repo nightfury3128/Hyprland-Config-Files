@@ -29,14 +29,15 @@ file=$(find "$WALLPAPER_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -in
 if [ -n "$file" ]; then
     cp "$file" /tmp/lock_bg.png
     
-    awww img "$file" --transition-type any --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 &
+    bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$file" any &
     
-    matugen image "$file" --source-color-index 0
-    
-    # Execute reload script if it exists
-    if [ -f "$RELOAD_SCRIPT_PATH" ]; then
-        chmod +x "$RELOAD_SCRIPT_PATH"
-        bash "$RELOAD_SCRIPT_PATH"
+    if [ -x "$HOME/.config/hypr/scripts/matugen_apply.sh" ]; then
+        bash "$HOME/.config/hypr/scripts/matugen_apply.sh" "$file" || true
+    else
+        matugen image "$file" --source-color-index 0 || true
+        if [ -f "$RELOAD_SCRIPT_PATH" ]; then
+            bash "$RELOAD_SCRIPT_PATH" || true
+        fi
     fi
 fi
 
