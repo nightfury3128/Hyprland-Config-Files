@@ -117,48 +117,74 @@ handle_network_prep() {
 # -----------------------------------------------------------------------------
 MAIN_QML_PATH="$HOME/.config/hypr/scripts/quickshell/Main.qml"
 BAR_QML_PATH="$HOME/.config/hypr/scripts/quickshell/TopBar.qml"
-ISLAND_QML_PATH="$HOME/.config/hypr/scripts/quickshell/DynamicIsland.qml"
-LAUNCHER_QML_PATH="$HOME/.config/hypr/scripts/quickshell/AppLauncher.qml"
-CLIPBOARD_QML_PATH="$HOME/.config/hypr/scripts/quickshell/ClipboardViewer.qml"
-SPEEDTEST_DAEMON_PATH="$HOME/.config/hypr/scripts/quickshell/network/speedtest_daemon.sh"
 
-if ! pgrep -f "quickshell.*Main\.qml" >/dev/null; then
-    quickshell -p "$MAIN_QML_PATH" >/dev/null 2>&1 &
-    disown
-fi
+# /proc comm is the real binary name ("quickshell"), then the cmdline is checked
+# for the qml path. pgrep -f matches its own argv and any shell that happens to
+# contain the pattern, which skipped starts or spawned duplicates.
+qs_running() {
+    local needle="$1"
+    local comm_path pid comm
+    for comm_path in /proc/[0-9]*/comm; do
+        comm=$(cat "$comm_path" 2>/dev/null) || continue
+        [ "$comm" = "quickshell" ] || continue
+        pid=${comm_path#/proc/}
+        pid=${pid%/comm}
+        tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -F -q -- "$needle" && return 0
+    done
+    return 1
+}
 
-if ! pgrep -f "quickshell.*TopBar\.qml" >/dev/null; then
+stop_quickshell_matching() {
+    local needle="$1"
+    local comm_path pid comm
+    for comm_path in /proc/[0-9]*/comm; do
+        comm=$(cat "$comm_path" 2>/dev/null) || continue
+        [ "$comm" = "quickshell" ] || continue
+        pid=${comm_path#/proc/}
+        pid=${pid%/comm}
+        if tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -F -q -- "$needle"; then
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
+}
+
+ensure_topbar() {
+    if qs_running "TopBar.qml"; then
+        return 0
+    fi
     quickshell -p "$BAR_QML_PATH" >/dev/null 2>&1 &
     disown
+}
+
+ensure_main() {
+    if ! qs_running "Main.qml"; then
+        quickshell -p "$MAIN_QML_PATH" >/dev/null 2>&1 &
+        disown
+    fi
+    # Wait until Main is up and its IPC watcher can see the toggle write.
+    local i
+    for i in $(seq 1 40); do
+        qs_running "Main.qml" && break
+        sleep 0.05
+    done
+    sleep 0.2
+}
+
+# Login / bare restart: only the bar stays up. Popups live in Main, which is
+# started on demand below and idle-quits on its own. No island, launcher,
+# clipboard, or speedtest process is kept resident.
+if [ -z "${ACTION:-}" ]; then
+    stop_quickshell_matching "Main.qml"
+    stop_quickshell_matching "DynamicIsland.qml"
+    stop_quickshell_matching "AppLauncher.qml"
+    stop_quickshell_matching "ClipboardViewer.qml"
+    stop_quickshell_matching "NotificationPopups.qml"
+    stop_quickshell_matching "IslandNotifications.qml"
+    pkill -f "speedtest_daemon.sh" >/dev/null 2>&1 || true
+    pkill -f "^nmcli monitor$" >/dev/null 2>&1 || true
 fi
 
-if ! pgrep -f "quickshell.*DynamicIsland\.qml" >/dev/null; then
-    quickshell -p "$ISLAND_QML_PATH" >/dev/null 2>&1 &
-    disown
-fi
-
-if ! pgrep -f "quickshell.*AppLauncher\.qml" >/dev/null; then
-    quickshell -p "$LAUNCHER_QML_PATH" >/dev/null 2>&1 &
-    disown
-fi
-
-if ! pgrep -f "quickshell.*ClipboardViewer\.qml" >/dev/null; then
-    quickshell -p "$CLIPBOARD_QML_PATH" >/dev/null 2>&1 &
-    disown
-fi
-
-# Reset any stale watcher-only processes before ensuring one daemon instance.
-pkill -f "speedtest_daemon\.sh" >/dev/null 2>&1 || true
-pkill -f "^nmcli monitor$" >/dev/null 2>&1 || true
-
-if ! pgrep -f "speedtest_daemon\.sh" >/dev/null; then
-    bash "$SPEEDTEST_DAEMON_PATH" >/dev/null 2>&1 &
-    disown
-fi
-
-# Ensure legacy notification windows are not running; notifications are handled by DynamicIsland.qml
-pkill -f "quickshell.*NotificationPopups\.qml" >/dev/null 2>&1 || true
-pkill -f "quickshell.*IslandNotifications\.qml" >/dev/null 2>&1 || true
+ensure_topbar
 
 # -----------------------------------------------------------------------------
 # IPC ROUTING
@@ -176,6 +202,19 @@ if [[ "$ACTION" == "close" ]]; then
 fi
 
 if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
+    # External app launcher (wofi). Clipboard UI is removed from the idle rice.
+    if [[ "$TARGET" == "launcher" ]]; then
+        bash "$HOME/.config/hypr/scripts/rofi_show.sh" &
+        disown
+        exit 0
+    fi
+    if [[ "$TARGET" == "clipboard" ]]; then
+        exit 0
+    fi
+
+    ensure_main
+    # Give the IPC watcher a moment, then write (and keep a copy for late readers).
+    sleep 0.15
     CURRENT_MODE=$(cat "$NETWORK_MODE_FILE" 2>/dev/null)
 
     # Network widget: bash must still own the mode-file logic here,
@@ -198,25 +237,6 @@ if [[ "$ACTION" == "open" || "$ACTION" == "toggle" ]]; then
             [[ -n "$SUBTARGET" ]] && echo "$SUBTARGET" > "$NETWORK_MODE_FILE"
             echo "$TARGET" > "$IPC_FILE"
         fi
-        exit 0
-    fi
-
-    # Music: route through the DynamicIsland (expand/collapse the island itself)
-    # instead of opening a separate popup window.
-    if [[ "$TARGET" == "music" ]]; then
-        echo "toggle" > /tmp/qs_island_toggle
-        exit 0
-    fi
-
-    # Launcher: toggle the Spotlight-style app launcher
-    if [[ "$TARGET" == "launcher" ]]; then
-        echo "toggle" > /tmp/qs_launcher
-        exit 0
-    fi
-
-    # Clipboard: toggle the clipboard history viewer
-    if [[ "$TARGET" == "clipboard" ]]; then
-        echo "toggle" > /tmp/qs_clipboard
         exit 0
     fi
 

@@ -1,0 +1,16 @@
+[config]
+reload_apps = true
+wallpaper = ["Wallpaper"]
+custom_colors_hex = []
+
+[templates.qs_colors]
+input_path = "~/.config/matugen/templates/qs_colors.json"
+output_path = "~/.cache/quickshell/qs_colors.json"
+
+[templates.wofi]
+input_path = "~/.config/matugen/templates/wofi.css"
+output_path = "~/.config/wofi/style.css"
+
+[templates.kitty]
+input_path = "~/.config/matugen/templates/kitty.conf"
+output_path = "~/.config/kitty/kitty-matugen-colors.conf"

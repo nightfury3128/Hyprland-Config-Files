@@ -225,7 +225,7 @@ Variants {
             Process {
                 id: wsWatcher
                 running: true
-                command: ["bash", "-c", "inotifywait -qq -e close_write,modify /tmp/qs_workspaces.json"]
+                command: ["bash", "-c", "inotifywait -qq -e close_write,modify /tmp/qs_workspaces.json || sleep 3"]
                 onExited: {
                     wsReader.running = true;
                     running = true;
@@ -298,7 +298,7 @@ Variants {
             Process {
                 id: mprisWatcher
                 running: true
-                command: ["bash", "-c", "dbus-monitor --session \"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.mpris.MediaPlayer2.Player'\" \"type='signal',interface='org.mpris.MediaPlayer2.Player',member='Seeked'\" 2>/dev/null | grep -m 1 'member=' > /dev/null || sleep 2"]
+                command: ["bash", "-c", "dbus-monitor --session \"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.mpris.MediaPlayer2.Player'\" \"type='signal',interface='org.mpris.MediaPlayer2.Player',member='Seeked'\" 2>/dev/null | grep -m 1 'member=' > /dev/null || sleep 8"]
                 onExited: {
                     musicForceRefresh.running = true;
                     running = true;
@@ -322,7 +322,8 @@ Variants {
                     }
                 }
             }
-            Process { id: kbWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/kb_wait.sh"]; onExited: kbPoller.running = true }
+            Timer { id: kbBackoff; interval: 2000; onTriggered: kbPoller.running = true }
+            Process { id: kbWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/kb_wait.sh"]; onExited: kbBackoff.restart() }
 
             // --- AUDIO ---
             Process {
@@ -345,7 +346,8 @@ Variants {
                     }
                 }
             }
-            Process { id: audioWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/audio_wait.sh"]; onExited: audioPoller.running = true }
+            Timer { id: audioBackoff; interval: 2000; onTriggered: audioPoller.running = true }
+            Process { id: audioWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/audio_wait.sh"]; onExited: audioBackoff.restart() }
 
             // --- NETWORK ---
             Process {
@@ -367,7 +369,8 @@ Variants {
                     }
                 }
             }
-	    Process { id: networkWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/network_wait.sh"]; onExited: networkPoller.running = true }
+            Timer { id: networkBackoff; interval: 3000; onTriggered: networkPoller.running = true }
+            Process { id: networkWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/network_wait.sh"]; onExited: networkBackoff.restart() }
 
             // --- BLUETOOTH ---
             Process {
@@ -388,32 +391,10 @@ Variants {
                     }
                 }
             }
-            Process { id: btWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/bt_wait.sh"]; onExited: btPoller.running = true }
+            Timer { id: btBackoff; interval: 3000; onTriggered: btPoller.running = true }
+            Process { id: btWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/bt_wait.sh"]; onExited: btBackoff.restart() }
 
-            // --- LIBREPODS (AirPods) ---
-            Process {
-                id: podsPoller; running: true
-                command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/librepods_fetch.sh"]
-                stdout: StdioCollector {
-                    onStreamFinished: {
-                        let txt = this.text.trim();
-                        if (txt !== "") {
-                            try {
-                                let data = JSON.parse(txt);
-                                if (barWindow.podsActive !== !!data.active) barWindow.podsActive = !!data.active;
-                                if (barWindow.podsConnected !== !!data.connected) barWindow.podsConnected = !!data.connected;
-                                if (barWindow.podsLabel !== data.label) barWindow.podsLabel = data.label || "";
-                                if (barWindow.podsIcon !== data.icon) barWindow.podsIcon = data.icon || "󱡏";
-                                if (barWindow.podsNoiseIcon !== data.noise_icon) barWindow.podsNoiseIcon = data.noise_icon || "󰓃";
-                                if (barWindow.podsNoise !== data.noise) barWindow.podsNoise = data.noise || "off";
-                                if (barWindow.podsName !== data.name) barWindow.podsName = data.name || "";
-                            } catch(e) { console.warn(e) }
-                        }
-                        podsWaiter.running = true;
-                    }
-                }
-            }
-            Process { id: podsWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/librepods_wait.sh"]; onExited: podsPoller.running = true }
+            // LibrePods UI is not polled from the bar. Bluetooth still uses btPoller.
 
             // --- BATTERY ---
             Process {
@@ -435,19 +416,23 @@ Variants {
                     }
                 }
             }
-            Process { id: batteryWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_wait.sh"]; onExited: batteryPoller.running = true }
+            Timer { id: batteryBackoff; interval: 5000; onTriggered: batteryPoller.running = true }
+            Process { id: batteryWaiter; command: ["bash", "-c", "~/.config/hypr/scripts/quickshell/watchers/battery_wait.sh"]; onExited: batteryBackoff.restart() }
 
 
-            // Native Qt Time Formatting
+            // Clock updates once a minute. Reschedule onto the next minute boundary.
             Timer {
-                interval: 1000; running: true; repeat: true; triggeredOnStart: true
+                interval: 60000; running: true; repeat: true; triggeredOnStart: true
                 onTriggered: {
                     let d = new Date();
-                    barWindow.timeStr = Qt.formatDateTime(d, "hh:mm:ss AP");
+                    barWindow.timeStr = Qt.formatDateTime(d, "hh:mm AP");
                     barWindow.fullDateStr = Qt.formatDateTime(d, "dddd, MMMM dd");
                     if (barWindow.typeInIndex >= barWindow.fullDateStr.length) {
                         barWindow.typeInIndex = barWindow.fullDateStr.length;
                     }
+                    let wait = (60 - d.getSeconds()) * 1000 - d.getMilliseconds();
+                    if (wait < 500) wait += 60000;
+                    interval = wait;
                 }
             }
 
@@ -784,14 +769,14 @@ Variants {
 
                             property int pillHeight: barWindow.s(34)
 
-                            // KB
+                            // Clock (replaces keyboard-layout pill)
                             Rectangle {
-                                property bool isHovered: kbMouse.containsMouse
+                                property bool isHovered: clockMouse.containsMouse
                                 color: isHovered ? Qt.rgba(mocha.surface1.r, mocha.surface1.g, mocha.surface1.b, 0.6) : Qt.rgba(mocha.surface0.r, mocha.surface0.g, mocha.surface0.b, 0.4)
                                 radius: barWindow.s(10); height: sysLayout.pillHeight;
                                 clip: true
                                 
-                                property real targetWidth: kbLayoutRow.width + barWindow.s(24)
+                                property real targetWidth: clockRow.width + barWindow.s(24)
                                 width: targetWidth
                                 Behavior on width { NumberAnimation { duration: 500; easing.type: Easing.OutQuint } }
                                 
@@ -806,11 +791,11 @@ Variants {
                                 Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
 
                                 Row { 
-                                    id: kbLayoutRow; anchors.centerIn: parent; spacing: barWindow.s(8)
-                                    Text { anchors.verticalCenter: parent.verticalCenter; text: "󰌌"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: parent.parent.isHovered ? mocha.text : mocha.overlay2 }
-                                    Text { anchors.verticalCenter: parent.verticalCenter; visible: !barWindow.compactEverywhere; text: barWindow.kbLayout; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; color: mocha.text }
+                                    id: clockRow; anchors.centerIn: parent; spacing: barWindow.s(8)
+                                    Text { anchors.verticalCenter: parent.verticalCenter; text: "󰥔"; font.family: "Iosevka Nerd Font"; font.pixelSize: barWindow.s(16); color: parent.parent.isHovered ? mocha.text : mocha.overlay2 }
+                                    Text { anchors.verticalCenter: parent.verticalCenter; text: barWindow.timeStr; font.family: "JetBrains Mono"; font.pixelSize: barWindow.s(13); font.weight: Font.Black; color: mocha.text }
                                 }
-                                MouseArea { id: kbMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Quickshell.execDetached(["hyprctl", "switchxkblayout", "main", "next"]) }
+                                MouseArea { id: clockMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Quickshell.execDetached(["bash", "-c", "~/.config/hypr/scripts/qs_manager.sh toggle guide"]) }
                             }
 
                             // WiFi / Ethernet (Desktop Mode)

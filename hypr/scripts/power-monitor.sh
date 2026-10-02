@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # power-monitor.sh — battery-aware idle + compositor tuning.
-# Switches hypridle config, toggles Hyprland eye-candy, and gates
-# background services (geo_timezone) based on AC/battery state.
+# Switches hypridle config and toggles Hyprland eye-candy based on AC/battery.
+# Never touches brightness. On battery, heavy helpers are stopped.
 
 HYPRIDLE_BIN=$(command -v hypridle 2>/dev/null)
 AC_CONF="$HOME/.config/hypr/hypridle-ac.conf"
@@ -33,28 +33,33 @@ apply_hypridle() {
     disown
 }
 
-apply_hyprctl_ac() {
+# Hyprland 0.56 rejects `hyprctl keyword` (Lua config). Brightness is never set.
+hypr_eval() {
     command -v hyprctl >/dev/null 2>&1 || return
-    hyprctl --batch "\
-        keyword animations:enabled 1 ;\
-        keyword decoration:blur:enabled true ;\
-        keyword decoration:blur:size 6 ;\
-        keyword decoration:blur:passes 1 ;\
-        keyword decoration:shadow:enabled true ;\
-        keyword decoration:active_opacity 0.92 ;\
-        keyword decoration:inactive_opacity 0.82 ;\
-        keyword misc:vrr 0" >/dev/null 2>&1
+    hyprctl eval "$1" >/dev/null 2>&1 || true
+}
+
+apply_qs_layer() {
+    local blur="$1"
+    local no_anim="$2"
+    hypr_eval "hl.layer_rule({ name = \"blur-quickshell\", match = { namespace = \"quickshell\" }, blur = ${blur}, no_anim = ${no_anim} })"
+}
+
+apply_hyprctl_ac() {
+    hypr_eval 'hl.config({ animations = { enabled = true }, decoration = { blur = { enabled = true, size = 6, passes = 1 }, shadow = { enabled = true }, active_opacity = 0.92, inactive_opacity = 0.82 }, misc = { vrr = 0 } })'
+    apply_qs_layer true false
 }
 
 apply_hyprctl_battery() {
-    command -v hyprctl >/dev/null 2>&1 || return
-    hyprctl --batch "\
-        keyword animations:enabled 0 ;\
-        keyword decoration:blur:enabled false ;\
-        keyword decoration:shadow:enabled false ;\
-        keyword decoration:active_opacity 1.0 ;\
-        keyword decoration:inactive_opacity 1.0 ;\
-        keyword misc:vrr 0" >/dev/null 2>&1
+    hypr_eval 'hl.config({ animations = { enabled = false }, decoration = { blur = { enabled = false }, shadow = { enabled = false }, active_opacity = 1.0, inactive_opacity = 1.0 }, misc = { vrr = 0 } })'
+    apply_qs_layer false true
+}
+
+stop_heavy_helpers() {
+    pkill -f "speedtest_daemon.sh" >/dev/null 2>&1 || true
+    pkill -x mpvpaper >/dev/null 2>&1 || true
+    pkill -x cliphist >/dev/null 2>&1 || true
+    pkill -f "cliphist store" >/dev/null 2>&1 || true
 }
 
 start_geo_tz() {
@@ -81,6 +86,7 @@ set_mode() {
         apply_hypridle "$BATTERY_CONF"
         apply_hyprctl_battery
         stop_geo_tz
+        stop_heavy_helpers
     fi
 }
 

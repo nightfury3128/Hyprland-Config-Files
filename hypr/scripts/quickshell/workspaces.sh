@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 
-# ============================================================================
-# 1. ZOMBIE PREVENTION
-# Kills any older instances of this script. When Quickshell reloads, 
-# it can leave the old listener pipelines running in the background infinitely.
-# ============================================================================
-for pid in $(pgrep -f "quickshell/workspaces.sh"); do
-    if [ "$pid" != "$$" ] && [ "$pid" != "$PPID" ]; then
-        kill -9 "$pid" 2>/dev/null
-    fi
-done
+# One listener. A Quickshell reload used to spawn another copy and the two
+# would kill -9 each other in a tight loop. flock keeps a single owner.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/qs_workspaces.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    exit 0
+fi
 
-# Cleanly kill immediate children (like socat) when the script exits normally
 cleanup() {
     pkill -P $$ 2>/dev/null
 }
@@ -73,26 +69,31 @@ print_workspaces() {
 # Print initial state
 print_workspaces
 
-# ============================================================================
-# 2. THE EVENT DEBOUNCER
-# Listen to Hyprland socket wrapped in an infinite loop
-# ============================================================================
+# Reconnect with backoff. A missing socket used to make socat exit and the
+# outer loop restart it with no delay, pegging a core.
+backoff=1
 while true; do
-    socat -u UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock - | while read -r line; do
+    started=$(date +%s)
+    socat -u UNIX-CONNECT:"$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" - | while read -r line; do
         case "$line" in
             workspace*|focusedmon*|activewindow*|createwindow*|closewindow*|movewindow*|destroyworkspace*)
-                
-                # -> THE FIX <-
-                # Hyprland emits HUNDREDS of events a second when you move/resize windows.
-                # This reads and discards all subsequent events arriving within a 50ms window.
-                # It bundles the storm into a single UI update, completely preventing CPU clogging!
+                # Hyprland emits bursts while moving or resizing. Drain them
+                # so the bar updates once per burst.
                 while read -t 0.05 -r extra_line; do
-                    continue
+                    :
                 done
 
                 print_workspaces
                 ;;
         esac
     done
-    sleep 1
+
+    now=$(date +%s)
+    if [ $((now - started)) -ge 5 ]; then
+        backoff=1
+    fi
+    sleep "$backoff"
+    if [ "$backoff" -lt 30 ]; then
+        backoff=$((backoff * 2))
+    fi
 done

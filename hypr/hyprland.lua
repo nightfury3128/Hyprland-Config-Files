@@ -32,7 +32,7 @@ hl.monitor({ output = "",          mode = "preferred", position = "auto", scale 
 
 local terminal    = "kitty"
 local fileManager = "dolphin"
-local menu        = os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh toggle launcher"
+local menu        = os.getenv("HOME") .. "/.config/hypr/scripts/rofi_show.sh"
 
 
 -------------------
@@ -41,16 +41,13 @@ local menu        = os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh to
 
 hl.on("hyprland.start", function()
     hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
-    hl.exec_cmd("/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1")
+    hl.exec_cmd("/usr/lib/polkit-kde-authentication-agent-1")
     hl.exec_cmd(terminal)
-    hl.exec_cmd("swww-daemon")
+    hl.exec_cmd("awww-daemon")
+    hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/set_wallpaper.sh")
     hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/power-monitor.sh")
-    hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/geo_timezone.sh")
-    hl.exec_cmd("swaybg -i " .. os.getenv("HOME") .. "/dotfiles/wallpapers/LockScreen.jpg")
-    hl.exec_cmd("sh -c 'pkill -x dunst; pkill -x mako; pkill -x swaync'")
     hl.exec_cmd("gnome-keyring-daemon --start --components=secrets")
     hl.exec_cmd("nm-applet --indicator")
-    hl.exec_cmd("/home/nipun/librepods/linux/build/librepods --hide")
     hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh")
 end)
 
@@ -181,13 +178,13 @@ hl.bind(mainMod .. " + P", hl.dsp.window.pseudo())
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"))
 hl.bind(mainMod .. " + L", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/lock.sh"))
 hl.bind(mainMod .. " + SHIFT + W", hl.dsp.exec_cmd("sh -c 'pkill -f \"quickshell\" ; sleep 0.3 && ~/.config/hypr/scripts/qs_manager.sh'"))
-hl.bind(mainMod .. " + W", hl.dsp.exec_cmd("kitty --class wallpaper-picker " .. os.getenv("HOME") .. "/.config/hypr/wallpaper.sh"))
+hl.bind(mainMod .. " + W", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh toggle wallpaper"))
 hl.bind("SUPER + G", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/quickshell/game-launcher/toggle.sh"))
 hl.bind(mainMod .. " + SHIFT + X", hl.dsp.window.close())
 hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("sh -c 'kill -9 $(hyprctl activewindow -j | jq -r .pid)'"))
 hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/power-toggle.sh"))
 
--- Launcher
+-- Launcher (apps-only wofi)
 hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(menu))
 hl.bind("SUPER + SPACE",       hl.dsp.exec_cmd(menu))
 
@@ -289,8 +286,10 @@ hl.window_rule({
 -- Blur katmanlari
 hl.layer_rule({ name = "blur-rofi",              match = { namespace = "rofi" },       blur = true })
 hl.layer_rule({ name = "ignore-alpha-rofi",      match = { namespace = "rofi" },       ignore_alpha = 0.3 })
-hl.layer_rule({ name = "blur-quickshell",        match = { namespace = "quickshell" }, blur = true })
-hl.layer_rule({ name = "ignore-alpha-quickshell",match = { namespace = "quickshell" }, ignore_alpha = 0.15 })
+hl.layer_rule({ name = "blur-wofi",              match = { namespace = "wofi" },       blur = true })
+hl.layer_rule({ name = "ignore-alpha-wofi",      match = { namespace = "wofi" },       ignore_alpha = 0.2 })
+-- Quickshell stays cheap at idle. power-monitor turns blur back on when on AC.
+hl.layer_rule({ name = "blur-quickshell",        match = { namespace = "quickshell" }, blur = false, no_anim = true })
 
 hl.device({
     name = "sony-interactive-entertainment-dualsense-wireless-controller-touchpad",

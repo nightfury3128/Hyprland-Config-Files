@@ -38,7 +38,7 @@ Item {
     Process {
         id: scaleWatcher
         // -qq keeps it completely silent. It waits for the file to exist, listens for a write, and then exits.
-        command: ["bash", "-c", "while [ ! -f ~/.config/hypr/settings.json ]; do sleep 1; done; inotifywait -qq -e modify,close_write ~/.config/hypr/settings.json"]
+        command: ["bash", "-c", "while [ ! -f ~/.config/hypr/settings.json ]; do sleep 1; done; inotifywait -qq -e modify,close_write ~/.config/hypr/settings.json || sleep 5"]
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
@@ -49,6 +49,16 @@ Item {
                 scaleWatcher.running = false;
                 scaleWatcher.running = true;
             }
+        }
+    }
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: {
+            scaleReader.running = false
+            scaleReader.running = true
         }
     }
 }

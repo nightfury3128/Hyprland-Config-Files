@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-PIPE="/tmp/qs_audio_wait_$$.fifo"
-mkfifo "$PIPE" 2>/dev/null
-trap 'rm -f "$PIPE"; kill $(jobs -p) 2>/dev/null; exit 0' EXIT INT TERM
-pactl subscribe 2>/dev/null | grep --line-buffered -E "sink|server" > "$PIPE" &
-read -r _ < "$PIPE"
+# Block until the next sink/server event, then exit so the bar refetches.
+# A dead pactl or a second waiter sleeps before returning so the bar cannot spin.
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/qs_audio_wait.lock"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+    sleep 8
+    exit 0
+fi
+
+if timeout 90 pactl subscribe 2>/dev/null | grep -m1 -E 'sink|server' >/dev/null; then
+    exit 0
+fi
+sleep 8
+exit 0
