@@ -143,9 +143,13 @@ Item {
     }
     property string setLanguage: ""
     property string setKbOptions: "grp:alt_shift_toggle"
+    property string setTimezone: ""
+    property string sudoPassword: ""
     property string dotsVersion: "Loading..."
     property string remoteVersion: ""
     property bool updateAvailable: false
+    property bool timezoneDropdownOpen: false
+    ListModel { id: timezoneModel }
 
     property var kbToggleModelArr: [
         { label: "Alt + Shift", val: "grp:alt_shift_toggle" },
@@ -184,13 +188,43 @@ Item {
             "topbarHelpIcon": root.setTopbarHelpIcon,
             "wallpaperDir": root.setWallpaperDir,
             "language": root.setLanguage,
-            "kbOptions": root.setKbOptions
+            "kbOptions": root.setKbOptions,
+            "timezone": root.setTimezone
         };
-        let jsonString = JSON.stringify(config, null, 2);
-        
-        let cmd = "mkdir -p ~/.config/hypr/ && echo '" + jsonString + "' > ~/.config/hypr/settings.json && notify-send 'Quickshell' 'Settings Applied Successfully!'";
-                  
+        let jsonString = JSON.stringify(config, null, 2).replace(/'/g, "'\\''");
+        let tz = (root.setTimezone || "").replace(/'/g, "'\\''");
+        let pw = (root.sudoPassword || "").replace(/'/g, "'\\''");
+
+        let cmd =
+            "mkdir -p ~/.config/hypr/ && printf '%s\\n' '" + jsonString + "' > ~/.config/hypr/settings.json; " +
+            "ok=1; " +
+            "cur=$(timedatectl show -p Timezone --value 2>/dev/null || true); " +
+            "if [ -n '" + tz + "' ] && [ '" + tz + "' != \"$cur\" ]; then " +
+            "  if [ -z '" + pw + "' ]; then notify-send 'Guide' 'Enter your sudo password to apply the timezone change.'; ok=0; " +
+            "  else " +
+            "    printf '%s\\n' '" + pw + "' | sudo -S -p '' timedatectl set-timezone '" + tz + "' >/tmp/qs_tz_apply.log 2>&1 || ok=0; " +
+            "  fi; " +
+            "fi; " +
+            "if [ \"$ok\" = 1 ]; then notify-send 'Quickshell' 'Settings Applied Successfully!'; " +
+            "else notify-send 'Guide' 'Settings saved, but timezone apply failed. Check sudo password.'; fi";
+
         Quickshell.execDetached(["bash", "-c", cmd]);
+        root.sudoPassword = "";
+    }
+
+    Process {
+        id: timezoneReader
+        command: ["bash", "-c", "timedatectl show -p Timezone --value 2>/dev/null; timedatectl list-timezones 2>/dev/null"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let lines = (this.text || "").trim().split("\n").filter(l => l.length > 0);
+                if (lines.length > 0 && !root.setTimezone)
+                    root.setTimezone = lines[0];
+                timezoneModel.clear();
+                for (let i = 1; i < lines.length; i++)
+                    timezoneModel.append({ name: lines[i] });
+            }
+        }
     }
 
     Process {
@@ -234,8 +268,22 @@ Item {
                         if (parsed.wallpaperDir !== undefined) root.setWallpaperDir = parsed.wallpaperDir;
                         if (parsed.language !== undefined && parsed.language !== "") root.setLanguage = parsed.language;
                         if (parsed.kbOptions !== undefined) root.setKbOptions = parsed.kbOptions;
+                        if (parsed.timezone !== undefined && parsed.timezone !== "") root.setTimezone = parsed.timezone;
                     } else {
-                        root.saveAppSettings();
+                        // Seed defaults without prompting for sudo.
+                        let config = {
+                            "uiScale": root.setUiScale,
+                            "openGuideAtStartup": root.setOpenGuideAtStartup,
+                            "topbarHelpIcon": root.setTopbarHelpIcon,
+                            "wallpaperDir": root.setWallpaperDir,
+                            "language": root.setLanguage,
+                            "kbOptions": root.setKbOptions,
+                            "timezone": root.setTimezone
+                        };
+                        Quickshell.execDetached(["bash", "-c",
+                            "mkdir -p ~/.config/hypr/ && printf '%s\\n' '" +
+                            JSON.stringify(config, null, 2).replace(/'/g, "'\\''") +
+                            "' > ~/.config/hypr/settings.json"]);
                     }
                 } catch (e) {
                     console.log("Error parsing global settings:", e);
@@ -471,48 +519,38 @@ Item {
         ListElement { title: "Monitors"; target: "monitors"; icon: "󰍹"; desc: "Quick display management."; preview: "previews/preview_monitors.png" }
     }
 
+    Process {
+        id: keybindsLoader
+        command: ["python3", Quickshell.env("HOME") + "/.config/hypr/scripts/keybinds_from_lua.py"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                dynamicKeybindsModel.clear();
+                try {
+                    let binds = JSON.parse(this.text.trim() || "[]");
+                    for (let i = 0; i < binds.length; i++) {
+                        let item = binds[i];
+                        dynamicKeybindsModel.append({
+                            k1: item.k1 || "",
+                            k2: item.k2 || "",
+                            action: item.action || "",
+                            cmd: item.cmd || ""
+                        });
+                    }
+                } catch (e) {
+                    console.log("Failed to load keybinds from hyprland.lua:", e);
+                }
+            }
+        }
+    }
+
     function buildKeybinds() {
-        dynamicKeybindsModel.clear();
-        let binds = [
-            { k1: "SUPER", k2: "RETURN", action: "Open Terminal (Kitty)", cmd: "kitty" },
-            { k1: "SUPER", k2: "D", action: "App Launcher (Drun)", cmd: "bash ~/.config/hypr/scripts/rofi_show.sh drun" },
-            { k1: "ALT", k2: "TAB", action: "Window Switcher", cmd: "bash ~/.config/hypr/scripts/rofi_show.sh window" },
-            { k1: "SUPER", k2: "C", action: "Clipboard History", cmd: "bash ~/.config/hypr/scripts/rofi_clipboard.sh" },
-            { k1: "SUPER", k2: "F", action: "Open Firefox", cmd: "firefox" },
-            { k1: "SUPER", k2: "E", action: "Open Nautilus", cmd: "nautilus" },
-            { k1: "ALT", k2: "F4", action: "Close Active Window/Widget", cmd: "bash -c 'if hyprctl activewindow | grep -q \"title: qs-master\"; then ~/.config/hypr/scripts/qs_manager.sh close; else hyprctl dispatch killactive; fi'" },
-            { k1: "SUPER+SHIFT", k2: "F", action: "Toggle Floating", cmd: "hyprctl dispatch togglefloating" },
-            { k1: "SUPER", k2: "L", action: "Lock Screen", cmd: "bash ~/.config/hypr/scripts/lock.sh" },
-            { k1: "PRINT", k2: "", action: "Screenshot", cmd: "bash ~/.config/hypr/scripts/screenshot.sh" },
-            { k1: "SHIFT", k2: "PRINT", action: "Screenshot (Edit)", cmd: "bash ~/.config/hypr/scripts/screenshot.sh --edit" },
-            { k1: "ALT+SHIFT", k2: "", action: "Switch Keyboard Layout", cmd: "hyprctl switchxkblayout main next" },
-            { k1: "SUPER", k2: "W", action: "Toggle Wallpaper Picker", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle wallpaper" },
-            { k1: "SUPER", k2: "Q", action: "Toggle Music Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle music" },
-            { k1: "SUPER", k2: "B", action: "Toggle Battery Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle battery" },
-            { k1: "SUPER", k2: "S", action: "Toggle Calendar Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle calendar" },
-            { k1: "SUPER", k2: "N", action: "Toggle Network Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle network" },
-            { k1: "SUPER", k2: "V", action: "Toggle Volume Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle volume" },
-            { k1: "SUPER", k2: "M", action: "Toggle Monitors Widget", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle monitors" },
-            { k1: "SUPER+SHIFT", k2: "T", action: "Toggle FocusTime", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle focustime" },
-            { k1: "SUPER+SHIFT", k2: "S", action: "Toggle Stewart AI", cmd: "bash ~/.config/hypr/scripts/qs_manager.sh toggle stewart" },
-            { k1: "SUPER", k2: "A", action: "Toggle SwayNC Panel", cmd: "swaync-client -t -sw" },
-            { k1: "SUPER", k2: "SPACE", action: "Play/Pause Media", cmd: "playerctl play-pause" },
-            { k1: "Media", k2: "Play/Pause", action: "Play/Pause Media", cmd: "playerctl play-pause" },
-            { k1: "Media", k2: "Vol Up/Down", action: "Adjust Volume", cmd: "swayosd-client --output-volume raise" },
-            { k1: "Media", k2: "Mute", action: "Mute Volume", cmd: "swayosd-client --output-volume mute-toggle" },
-            { k1: "Media", k2: "Mic Mute", action: "Mute Microphone", cmd: "swayosd-client --input-volume mute-toggle" },
-            { k1: "Media", k2: "Brightness", action: "Adjust Brightness", cmd: "swayosd-client --brightness raise" },
-            { k1: "CAPS", k2: "LOCK", action: "Caps Lock OSD", cmd: "swayosd-client --caps-lock" },
-            { k1: "SUPER", k2: "ARROWS", action: "Move Focus", cmd: "hyprctl dispatch movefocus r" },
-            { k1: "SUPER+CTRL", k2: "ARROWS", action: "Move Window", cmd: "hyprctl dispatch movewindow r" },
-            { k1: "SUPER+SHIFT", k2: "ARROWS", action: "Resize Window", cmd: "hyprctl dispatch resizeactive 50 0" }
-        ];
-        for (let item of binds) { dynamicKeybindsModel.append(item); }
+        keybindsLoader.running = true;
     }
 
     Component.onCompleted: { 
         startupSequence.start(); 
-        buildKeybinds(); 
+        buildKeybinds();
+        timezoneReader.running = true;
     }
 
     ParallelAnimation {
@@ -1307,7 +1345,36 @@ Item {
                             Layout.alignment: Qt.AlignVCenter 
                         }
                         
-                        Item { Layout.fillWidth: true } 
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            Layout.preferredWidth: root.s(220)
+                            Layout.preferredHeight: root.s(44)
+                            radius: root.s(8)
+                            color: root.surface0
+                            border.color: sudoPwInput.activeFocus ? root.peach : root.surface2
+                            border.width: 1
+                            TextInput {
+                                id: sudoPwInput
+                                anchors.fill: parent
+                                anchors.margins: root.s(10)
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: root.s(13)
+                                color: root.text
+                                echoMode: TextInput.Password
+                                passwordCharacter: "•"
+                                clip: true
+                                text: root.sudoPassword
+                                onTextChanged: root.sudoPassword = text
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "sudo password for Apply"
+                                    color: root.subtext0
+                                    font: parent.font
+                                    visible: !parent.text && !parent.activeFocus
+                                }
+                            }
+                        }
 
                         Rectangle {
                             Layout.preferredWidth: root.s(110)
@@ -1334,6 +1401,83 @@ Item {
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.saveAppSettings() 
+                            }
+                        }
+                    }
+
+                    // Timezone picker
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: root.timezoneDropdownOpen ? root.s(260) : root.s(70)
+                        radius: root.s(8)
+                        color: Qt.alpha(root.surface0, 0.4)
+                        border.color: root.surface1
+                        border.width: 1
+                        clip: true
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: root.s(12)
+                            spacing: root.s(8)
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: root.s(12)
+                                Text { text: "󰗃"; font.family: "Iosevka Nerd Font"; font.pixelSize: root.s(18); color: root.peach }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { text: "Timezone"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text }
+                                    Text { text: root.setTimezone || "Detecting…"; font.family: "JetBrains Mono"; font.pixelSize: root.s(11); color: root.subtext0; elide: Text.ElideRight; Layout.fillWidth: true }
+                                }
+                                Rectangle {
+                                    Layout.preferredWidth: root.s(100)
+                                    Layout.preferredHeight: root.s(34)
+                                    radius: root.s(8)
+                                    color: tzPickMa.containsMouse ? root.surface1 : root.surface0
+                                    border.color: root.surface2
+                                    border.width: 1
+                                    Text { anchors.centerIn: parent; text: root.timezoneDropdownOpen ? "Close" : "Pick"; font.family: "JetBrains Mono"; font.pixelSize: root.s(12); color: root.text }
+                                    MouseArea {
+                                        id: tzPickMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.timezoneDropdownOpen = !root.timezoneDropdownOpen
+                                    }
+                                }
+                            }
+
+                            ListView {
+                                visible: root.timezoneDropdownOpen
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: timezoneModel
+                                delegate: Rectangle {
+                                    width: ListView.view.width
+                                    height: root.s(30)
+                                    color: tzItemMa.containsMouse ? root.surface2 : "transparent"
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: root.s(8)
+                                        text: model.name
+                                        font.family: "JetBrains Mono"
+                                        font.pixelSize: root.s(12)
+                                        color: root.text
+                                    }
+                                    MouseArea {
+                                        id: tzItemMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            root.setTimezone = model.name;
+                                            root.timezoneDropdownOpen = false;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2576,7 +2720,7 @@ Item {
                                     anchors.margins: root.s(10)
                                     spacing: root.s(10)
                                     
-                                    Text { text: "Workspaces (SUPER + 1-9)"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.alignment: Qt.AlignVCenter }
+                                    Text { text: "Workspaces (Win + 1–0)"; font.family: "JetBrains Mono"; font.weight: Font.Bold; font.pixelSize: root.s(13); color: root.text; Layout.alignment: Qt.AlignVCenter }
                                     Item { Layout.fillWidth: true }
                                     
                                     Repeater {

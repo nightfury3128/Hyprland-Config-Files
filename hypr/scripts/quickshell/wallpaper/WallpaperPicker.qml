@@ -91,6 +91,7 @@ Item {
         window.targetWallName = safeFileName
         let cleanName = window.getCleanName(safeFileName)
         let reloadScript = Qt.resolvedUrl("matugen_reload.sh").toString()
+        let applyColors = Quickshell.env("HOME") + "/.config/hypr/scripts/matugen_apply.sh"
         
         if (reloadScript.startsWith("file://")) {
             reloadScript = decodeURIComponent(reloadScript.substring(7))
@@ -104,7 +105,8 @@ Item {
         const randomTransition = window.transitions[Math.floor(Math.random() * window.transitions.length)];
         
         // 3. AUTO-REVIVE COMMAND: Ensure daemon is alive before sending IPC commands
-        const ensureDaemonCmd = `if ! pgrep -x "awww-daemon" > /dev/null; then awww-daemon >/dev/null 2>&1 & sleep 0.2; fi`;
+        const ensureDaemonCmd = `if ! command -v awww >/dev/null 2>&1; then notify-send "Wallpaper" "awww is not installed. Install it with: sudo pacman -S awww"; exit 1; fi; if ! pgrep -x "awww-daemon" > /dev/null; then awww-daemon >/dev/null 2>&1 & sleep 0.2; fi`;
+        const themeCmd = `bash "${escapeBash(applyColors)}"`;
         
         if (window.currentFilter === "Search" && window.hasSearched) {
             let alreadyExists = window.isDownloaded(safeFileName);
@@ -129,14 +131,12 @@ Item {
                         ${ensureDaemonCmd}
                         
                         # Run matugen completely detached so it doesn't block awww execution
-                        ( matugen image "$FINAL_THUMB" || true; bash "$RELOAD_SCRIPT" || true ) &
+                        ( ${themeCmd} "$DEST_FILE" || true ) &
                         MATUGEN_PID=$!
                         
                         # DETERMINISTIC LOOP
                         for i in {1..20}; do
-                            if ${renderOverride}awww img "$DEST_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                                break
-                            fi
+                            bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$DEST_FILE" ${randomTransition} >/dev/null 2>&1 && break
                             sleep 0.05
                         done
                         
@@ -178,14 +178,12 @@ Item {
                             
                             ${ensureDaemonCmd}
                             
-                            ( matugen image "$FINAL_THUMB" || true; bash "$RELOAD_SCRIPT" || true ) &
+                            ( ${themeCmd} "$DEST_FILE" || true ) &
                             MATUGEN_PID=$!
                             
                             # DETERMINISTIC LOOP
                             for i in {1..20}; do
-                                if ${renderOverride}awww img "$DEST_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                                    break
-                                fi
+                                bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$DEST_FILE" ${randomTransition} >/dev/null 2>&1 && break
                                 sleep 0.05
                             done
                             
@@ -215,9 +213,7 @@ Item {
             wallpaperCmd = `
                 ${ensureDaemonCmd}
                 for i in {1..20}; do
-                    if ${renderOverride}awww img "$WALL_FILE" --transition-type ${randomTransition} --transition-pos 0.5,0.5 --transition-fps 144 --transition-duration 1 >/dev/null 2>&1; then
-                        break
-                    fi
+                    bash "$HOME/.config/hypr/scripts/wallpaper_apply.sh" "$WALL_FILE" ${randomTransition} >/dev/null 2>&1 && break
                     sleep 0.05
                 done
             `
@@ -235,7 +231,7 @@ Item {
                 ${lockBgCmd} || true
                 pkill mpvpaper || true
                 
-                ( matugen image "$THUMB_FILE" || true; bash "$RELOAD_SCRIPT" || true ) &
+                ( ${themeCmd} "$WALL_FILE" || ${themeCmd} "$THUMB_FILE" || true ) &
                 MATUGEN_PID=$!
                 
                 ${wallpaperCmd}

@@ -157,7 +157,13 @@ Item {
             "powerprofilesctl get 2>/dev/null || echo 'balanced'; " +
             "awk '{print int($1/3600)\"h \"int(($1%3600)/60)\"m\"}' /proc/uptime 2>/dev/null || echo '0h 0m'; " +
             "$HOME/.config/hypr/scripts/brightness.sh 2>/dev/null || echo '0'; " +
-            "gpu=0; if command -v nvidia-smi >/dev/null 2>&1; then gpu=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9'); " +
+            "gpu=0; nv_awake=0; " +
+            "for d in /sys/bus/pci/devices/*/vendor; do " +
+            "[ \"$(cat \"$d\" 2>/dev/null)\" = \"0x10de\" ] || continue; " +
+            "s=$(cat \"${d%/vendor}/power/runtime_status\" 2>/dev/null); " +
+            "[ \"$s\" != \"suspended\" ] && nv_awake=1 && break; " +
+            "done; " +
+            "if [ \"$nv_awake\" = \"1\" ] && command -v nvidia-smi >/dev/null 2>&1; then gpu=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -dc '0-9'); " +
             "elif f=$(find /sys/class/drm -name gpu_busy_percent 2>/dev/null | head -n1); [ -n \"$f\" ]; then gpu=$(cat \"$f\" 2>/dev/null); fi; echo \"${gpu:-0}\""
         ]
         running: true
@@ -292,9 +298,6 @@ Item {
             RowLayout {
                 anchors.fill: parent
                 spacing: 0
-
-                // Notification center moved to Dynamic Island (navigation arrows inside the island)
-                // --- REMOVED: LEFT SIDE NOTIFICATION CENTER ---
 
                 // ==========================================
                 // RIGHT SIDE: SYSTEM RESOURCES CORE

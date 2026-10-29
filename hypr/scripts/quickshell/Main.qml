@@ -61,10 +61,28 @@ PanelWindow {
 
     Component.onCompleted: {
         Quickshell.execDetached(["bash", "-c", "echo '" + currentActive + "' > /tmp/qs_active_widget"]);
+        armIdleQuit();
     }
 
     property string currentActive: "hidden" 
     property bool isVisible: false
+
+    // Main is started on demand. Once the popup is gone, leave after a short idle.
+    Timer {
+        id: idleQuit
+        interval: 2500
+        onTriggered: {
+            if (!masterWindow.isVisible && masterWindow.currentActive === "hidden")
+                Qt.quit();
+        }
+    }
+
+    function armIdleQuit() {
+        if (masterWindow.isVisible || masterWindow.currentActive !== "hidden")
+            idleQuit.stop();
+        else
+            idleQuit.restart();
+    }
     property string activeArg: ""
     property bool disableMorph: false 
     property int morphDuration: 500
@@ -113,23 +131,10 @@ PanelWindow {
                 "notif": n
             };
 
-            // A. Insert into the permanent center
+            // Insert into the permanent notification history (shown in the center).
             globalNotificationHistory.insert(0, notifData);
-
-            // B. Dynamic Island is the live notification surface.
-            Quickshell.execDetached([
-                "bash", "-c",
-                'printf "%s\n" "$1" > /tmp/qs_island_notif',
-                "qs_notif_sender",
-                JSON.stringify({
-                    appName: notifData.appName,
-                    title:   notifData.summary,
-                    body:    notifData.body,
-                    icon:    notifData.iconPath
-                })
-            ]);
         }
-    }    
+    }
     property var notifModel: globalNotificationHistory
     
     // =========================================================
@@ -195,7 +200,7 @@ PanelWindow {
         running: true
         command: ["bash", "-c",
             "socat -u UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock - " +
-            "| grep -m1 '^focusedmon'"]
+            "| grep -m1 '^focusedmon' || sleep 3"]
         onExited: { focusedMonProc.running = true; running = true; }
     }
     Timer { interval: 150; running: true; triggeredOnStart: true; onTriggered: focusedMonProc.running = true }
@@ -219,7 +224,10 @@ PanelWindow {
     }
 
     onIsVisibleChanged: {
-        if (isVisible) masterWindow.requestActivate();
+        if (isVisible) {
+            idleQuit.stop();
+            masterWindow.requestActivate();
+        }
     }
     
     Item {
@@ -280,6 +288,8 @@ PanelWindow {
     }
 
     function switchWidget(newWidget, arg) {
+        if (newWidget !== "hidden")
+            idleQuit.stop();
         Quickshell.execDetached(["bash", "-c", "echo '" + newWidget + "' > /tmp/qs_active_widget"]);
 
         prepTimer.stop();
@@ -303,14 +313,13 @@ PanelWindow {
                 masterWindow.exitDuration = 300;
                 masterWindow.disableMorph = false;
                 
-                // Popup-like widgets should originate near the top-right bar button,
-                // while island-style widgets keep the center-origin animation.
+                // Right-aligned popups originate near their bar button; everything
+                // else fades in from the top-center of the screen.
                 let initialLayout = getLayout(newWidget);
                 if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume" || newWidget === "librepods")) {
                     masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
                     masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
                 } else {
-                    // Polymorphic start point: top center where the island is
                     masterWindow.animX = Math.floor(masterWindow.mw / 2);
                     masterWindow.animY = 35;
                 }
@@ -372,8 +381,13 @@ PanelWindow {
     Process {
         id: ipcWatcher
         command: ["bash", "-c",
-            "inotifywait -qq -e close_write,moved_to --include 'qs_widget_state$' /tmp/ 2>/dev/null; " +
-            "if [ -f /tmp/qs_widget_state ]; then cat /tmp/qs_widget_state && rm -f /tmp/qs_widget_state; fi"
+            "f=/tmp/qs_widget_state; " +
+            "for i in 1 2 3 4 5 6 7 8 9 10; do " +
+            "  if [ -s \"$f\" ]; then cat \"$f\"; rm -f \"$f\"; exit 0; fi; " +
+            "  sleep 0.05; " +
+            "done; " +
+            "inotifywait -qq -e close_write,moved_to --include 'qs_widget_state$' /tmp/ 2>/dev/null || sleep 2; " +
+            "if [ -f \"$f\" ]; then cat \"$f\"; rm -f \"$f\"; fi"
         ]
         running: true
         stdout: StdioCollector {
@@ -415,6 +429,7 @@ PanelWindow {
                 masterWindow.activeMonitor = masterWindow.pendingMonitor;
                 masterWindow.pendingMonitor = "";
             }
+            armIdleQuit();
         }
     }
 }

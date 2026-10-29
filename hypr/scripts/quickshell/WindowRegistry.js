@@ -30,7 +30,7 @@ function getLayout(name, mx, my, mw, mh, userScale) {
         // Centered horizontally dynamically based on current screen width
         "calendar":  { w: s(1450, scale), h: s(750, scale), rx: Math.floor((mw/2)-(s(1450, scale)/2)), ry: s(70, scale), comp: "calendar/CalendarPopup.qml" },
         
-        // Centered horizontally under the dynamic island
+        // Centered horizontally, just below the bar
         "music":     { w: s(700, scale), h: s(620, scale), rx: Math.floor((mw/2)-(s(700, scale)/2)), ry: s(70, scale), comp: "music/MusicPopup.qml" },
         
         // Right-aligned: pinned 20px from screen edge (Width: 960 + 20 margin = 980)

@@ -29,22 +29,15 @@ PanelWindow {
 
     Timer { id: hideTimer; interval: 600; onTriggered: root._showing = false }
 
-    Process { id: islandHideProc; command: ["bash", "-c", "echo 1 > /tmp/qs_launcher_state"] }
-    Process { id: islandShowProc; command: ["bash", "-c", "echo 0 > /tmp/qs_launcher_state"] }
-
-    Component.onCompleted: { islandShowProc.running = true }
-
     onOpenChanged: {
         if (open) {
             hideTimer.stop()
             _showing = true
-            islandHideProc.running = false; islandHideProc.running = true
             searchInput.text = ""
             clipProc.running = false; clipProc.running = true
             Qt.callLater(function() { searchInput.forceActiveFocus() })
         } else {
             hideTimer.restart()
-            islandShowProc.running = false; islandShowProc.running = true
         }
     }
 
