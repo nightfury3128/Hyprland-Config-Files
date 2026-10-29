@@ -51,14 +51,4 @@ Item {
             }
         }
     }
-
-    Timer {
-        interval: 60000
-        running: true
-        repeat: true
-        onTriggered: {
-            scaleReader.running = false
-            scaleReader.running = true
-        }
-    }
 }

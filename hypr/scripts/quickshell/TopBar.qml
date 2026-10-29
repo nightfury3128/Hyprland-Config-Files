@@ -258,8 +258,10 @@ Variants {
             }
 
             Timer {
+                // Only tick while a track is actually playing. Was running
+                // unconditionally — now idles when music is paused/stopped.
                 interval: 1000
-                running: true
+                running: barWindow.musicData && barWindow.musicData.status === "Playing"
                 repeat: true
                 onTriggered: {
                     if (!barWindow.musicData || barWindow.musicData.status !== "Playing") return;
@@ -461,29 +463,11 @@ Variants {
             Item {
                 anchors.fill: parent
 
-                // ---------------- CENTER (DYNAMIC ISLAND PLACEHOLDER) ----------------
-                // The real dynamic island is rendered by DynamicIsland.qml on the Overlay
-                // layer. This invisible item only reserves horizontal space so the
-                // left/right sections never overlap the real island.
-                Item {
-                    id: centerBox
-                    anchors.centerIn: parent
-
-                    height: barWindow.barHeight
-                    // Width must match DynamicIsland.qml's collapsedW formula.
-                    width: {
-                        if (!barWindow.isMediaActive) return barWindow.s(260);
-                        let titleLen = Math.min(18, (barWindow.musicData.title || "").length);
-                        return barWindow.s(190) + titleLen * barWindow.s(7);
-                    }
-                    Behavior on width { NumberAnimation { duration: 450; easing.type: Easing.OutExpo } }
-                }
-
                 // ---------------- LEFT ----------------
                 RowLayout {
                     id: leftLayout
                     anchors.left: parent.left
-                    anchors.right: centerBox.left  // Hard boundary to prevent overlaps
+                    anchors.right: parent.horizontalCenter
                     anchors.rightMargin: barWindow.s(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: barWindow.s(4) 
@@ -645,7 +629,7 @@ Variants {
                 RowLayout {
                     id: rightLayout
                     anchors.right: parent.right
-                    anchors.left: centerBox.right // Hard boundary to prevent overlaps
+                    anchors.left: parent.horizontalCenter
                     anchors.leftMargin: barWindow.s(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: barWindow.compactRightPills ? barWindow.s(2) : barWindow.s(4)

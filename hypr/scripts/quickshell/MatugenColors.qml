@@ -83,15 +83,4 @@ Item {
         }
         Component.onCompleted: reload()
     }
-
-    Timer {
-        interval: 60000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            themeFile.reload()
-            themeFallback.reload()
-        }
-    }
 }

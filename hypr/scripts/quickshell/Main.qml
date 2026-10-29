@@ -131,23 +131,10 @@ PanelWindow {
                 "notif": n
             };
 
-            // A. Insert into the permanent center
+            // Insert into the permanent notification history (shown in the center).
             globalNotificationHistory.insert(0, notifData);
-
-            // B. Dynamic Island is the live notification surface.
-            Quickshell.execDetached([
-                "bash", "-c",
-                'printf "%s\n" "$1" > /tmp/qs_island_notif',
-                "qs_notif_sender",
-                JSON.stringify({
-                    appName: notifData.appName,
-                    title:   notifData.summary,
-                    body:    notifData.body,
-                    icon:    notifData.iconPath
-                })
-            ]);
         }
-    }    
+    }
     property var notifModel: globalNotificationHistory
     
     // =========================================================
@@ -326,14 +313,13 @@ PanelWindow {
                 masterWindow.exitDuration = 300;
                 masterWindow.disableMorph = false;
                 
-                // Popup-like widgets should originate near the top-right bar button,
-                // while island-style widgets keep the center-origin animation.
+                // Right-aligned popups originate near their bar button; everything
+                // else fades in from the top-center of the screen.
                 let initialLayout = getLayout(newWidget);
                 if (initialLayout && (newWidget === "network" || newWidget === "battery" || newWidget === "volume" || newWidget === "librepods")) {
                     masterWindow.animX = initialLayout.rx + initialLayout.w - Registry.s(44, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
                     masterWindow.animY = initialLayout.ry + Registry.s(16, Registry.getScale(masterWindow.mw, masterWindow.globalUiScale));
                 } else {
-                    // Polymorphic start point: top center where the island is
                     masterWindow.animX = Math.floor(masterWindow.mw / 2);
                     masterWindow.animY = 35;
                 }

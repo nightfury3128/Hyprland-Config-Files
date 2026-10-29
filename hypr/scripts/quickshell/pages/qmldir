@@ -1,9 +1,0 @@
-module pages
-AppPage 1.0 AppPage.qml
-ClockPage 1.0 ClockPage.qml
-DiscordPage 1.0 DiscordPage.qml
-MusicPage 1.0 MusicPage.qml
-NotifsPage 1.0 NotifsPage.qml
-NotifExpandedPage 1.0 NotifExpandedPage.qml
-RecordingPage 1.0 RecordingPage.qml
-StashPage 1.0 StashPage.qml

@@ -16,15 +16,18 @@ mkdir -p "$QS_NETWORK_CACHE"
 IPC_FILE="/tmp/qs_widget_state"
 NETWORK_MODE_FILE="$QS_NETWORK_CACHE/mode"
 
-# Notifications are handled by Quickshell DynamicIsland NotificationServer.
-# Stop legacy daemons to avoid duplicate popups.
-pkill -x dunst >/dev/null 2>&1 || true
-pkill -x mako >/dev/null 2>&1 || true
-pkill -x swaync >/dev/null 2>&1 || true
-
 ACTION="$1"
 TARGET="$2"
 SUBTARGET="$3"
+
+# Notifications are handled by Main.qml's NotificationServer.
+# Stop legacy daemons on autostart only (empty ACTION) so hotkey invocations
+# don't fork three pkills on every widget toggle.
+if [ -z "${ACTION:-}" ]; then
+    pkill -x dunst >/dev/null 2>&1 || true
+    pkill -x mako >/dev/null 2>&1 || true
+    pkill -x swaync >/dev/null 2>&1 || true
+fi
 
 # -----------------------------------------------------------------------------
 # FAST PATH: WORKSPACE SWITCHING
@@ -171,15 +174,11 @@ ensure_main() {
 }
 
 # Login / bare restart: only the bar stays up. Popups live in Main, which is
-# started on demand below and idle-quits on its own. No island, launcher,
-# clipboard, or speedtest process is kept resident.
+# started on demand below and idle-quits on its own.
 if [ -z "${ACTION:-}" ]; then
     stop_quickshell_matching "Main.qml"
-    stop_quickshell_matching "DynamicIsland.qml"
     stop_quickshell_matching "AppLauncher.qml"
     stop_quickshell_matching "ClipboardViewer.qml"
-    stop_quickshell_matching "NotificationPopups.qml"
-    stop_quickshell_matching "IslandNotifications.qml"
     pkill -f "speedtest_daemon.sh" >/dev/null 2>&1 || true
     pkill -f "^nmcli monitor$" >/dev/null 2>&1 || true
 fi

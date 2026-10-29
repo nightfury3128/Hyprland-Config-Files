@@ -32,19 +32,10 @@ PanelWindow {
         onTriggered: launcherRoot._showing = false
     }
 
-    // Tell island to hide (1) or show (0) — two static processes, no binding issues
-    Process { id: islandHideProc; command: ["bash", "-c", "echo 1 > /tmp/qs_launcher_state"] }
-    Process { id: islandShowProc; command: ["bash", "-c", "echo 0 > /tmp/qs_launcher_state"] }
-
-    // On startup ensure island is visible (clears any stale state from previous session)
-    Component.onCompleted: { islandShowProc.running = true }
-
     onOpenChanged: {
         if (open) {
             hideTimer.stop()
             _showing = true
-            islandHideProc.running = false
-            islandHideProc.running = true
             usageLoadProc.running = false
             usageLoadProc.running = true
             searchInput.text = ""
@@ -54,8 +45,6 @@ PanelWindow {
             Qt.callLater(function() { searchInput.forceActiveFocus() })
         } else {
             hideTimer.restart()
-            islandShowProc.running = false
-            islandShowProc.running = true
         }
     }
 
@@ -224,7 +213,8 @@ PanelWindow {
     }
 
     // ── Launcher card ────────────────────────────────────────────────────────
-    // Starts at island position (top-center, y=8) and morphs to screen center.
+    // Starts as a small pill near the top of the screen (y=8), morphs to the
+    // full card centered on the screen when opened.
     Rectangle {
         id: card
 
@@ -235,9 +225,9 @@ PanelWindow {
         height: launcherRoot.open ? openH  : s(40)
         radius: launcherRoot.open ? s(24)  : s(20)
 
-        // Horizontal: always centered (mirrors island x = (Screen.width - width) / 2)
+        // Horizontal: always centered on screen
         x: Math.round((parent.width - width) / 2)
-        // Vertical: island top position → screen center
+        // Vertical: top-pill position → screen center
         y: launcherRoot.open ? Math.round((parent.height - openH) / 2) : s(8)
 
         Behavior on width  { NumberAnimation { duration: 540; easing.type: Easing.OutExpo } }

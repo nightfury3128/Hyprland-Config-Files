@@ -7,8 +7,11 @@
 ---- ENVIRONMENT VARIABLES ----
 -------------------------------
 
--- Battery/internal-panel test: expose only the Intel GPU to Hyprland
-hl.env("AQ_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
+-- Hybrid: Intel primary, NVIDIA secondary (Samsung HDMI is on the dGPU).
+-- Use colon-free udev symlinks — NEVER put /dev/dri/by-path/pci-0000:... here
+-- (colons break AQ_DRM_DEVICES parsing). card1/card2 order is NOT stable across boots.
+-- Takes effect on next Hyprland start. Do not hyprctl reload just for this.
+hl.env("AQ_DRM_DEVICES", "/dev/dri/intel-igpu:/dev/dri/nvidia-dgpu")
 
 hl.env("XCURSOR_SIZE",   "24")
 hl.env("HYPRCURSOR_SIZE", "24")
@@ -49,6 +52,18 @@ hl.on("hyprland.start", function()
     hl.exec_cmd("gnome-keyring-daemon --start --components=secrets")
     hl.exec_cmd("nm-applet --indicator")
     hl.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh")
+end)
+
+-- Make Samsung 4K the primary XWayland monitor whenever available
+local xwayland_primary_script =
+    os.getenv("HOME") .. "/.config/hypr/scripts/set-xwayland-primary.sh"
+
+hl.on("hyprland.start", function()
+    hl.exec_cmd(xwayland_primary_script)
+end)
+
+hl.on("monitor.added", function()
+    hl.exec_cmd(xwayland_primary_script)
 end)
 
 
@@ -185,7 +200,7 @@ hl.bind("SUPER + SHIFT + Q", hl.dsp.exec_cmd("sh -c 'kill -9 $(hyprctl activewin
 hl.bind(mainMod .. " + SHIFT + P", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/power-toggle.sh"))
 
 -- Launcher (apps-only wofi)
-hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(menu))
+hl.bind(mainMod .. " + R",     hl.dsp.exec_cmd(os.getenv("HOME") .. "/.config/hypr/scripts/qs_manager.sh"))
 hl.bind("SUPER + SPACE",       hl.dsp.exec_cmd(menu))
 
 -- App launchers
@@ -220,10 +235,12 @@ hl.bind(mainMod .. " + up",    hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + down",  hl.dsp.focus({ direction = "down" }))
 
 -- Workspace gecis + pencereyi workspace'e tasi
+local cursor_to_ws = os.getenv("HOME") .. "/.config/hypr/scripts/cursor-to-workspace.sh"
 for i = 1, 10 do
     local key = i % 10 -- 10 maps to key 0
     hl.bind(mainMod .. " + " .. key,           hl.dsp.focus({ workspace = i }))
     hl.bind(mainMod .. " + SHIFT + " .. key,   hl.dsp.window.move({ workspace = i }))
+    hl.bind("ALT + " .. key,                   hl.dsp.exec_cmd(cursor_to_ws .. " " .. i))
 end
 
 -- Mouse
